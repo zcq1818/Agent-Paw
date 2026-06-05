@@ -1,5 +1,5 @@
 # 🐾 Paw — 皮卡丘桌面宠物 Agent
-
+https://github.com/JASON-QWeb/Meow-Pilot
 > 把一只会聊天、会干活的皮卡丘放进你的 Windows 桌面。
 
 ## ✨ 特性
