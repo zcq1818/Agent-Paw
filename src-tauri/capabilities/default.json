@@ -1,0 +1,11 @@
+{
+  "identifier": "default",
+  "description": "Capability for the main and pet windows",
+  "windows": ["main", "pet"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open",
+    "shell:allow-execute",
+    "store:default"
+  ]
+}
