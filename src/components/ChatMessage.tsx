@@ -1,4 +1,7 @@
-import ReactMarkdown from "react-markdown";
+import { useMemo, useState } from "react";
+import type { SurfaceSpec } from "../agent/surfaces";
+import { MarkdownContent } from "./MarkdownContent";
+import { SurfaceRenderer } from "./SurfaceRenderer";
 
 interface ChatMessageProps {
   message: {
@@ -6,45 +9,74 @@ interface ChatMessageProps {
     role: "user" | "assistant" | "system";
     content: string;
     createdAt: string;
-    surface?: unknown;
+    surface?: SurfaceSpec;
   };
   isStreaming?: boolean;
+  onSurfaceAction?: (prompt: string) => void;
 }
 
-export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
+export function ChatMessage({ message, isStreaming, onSurfaceAction }: ChatMessageProps) {
   const isUser = message.role === "user";
+  const [copied, setCopied] = useState(false);
+  const timeLabel = useMemo(() => {
+    const date = new Date(message.createdAt);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  }, [message.createdAt]);
+
+  const copyMessage = async () => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  };
 
   return (
     <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}>
-      {/* 头像 */}
       <div
-        className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-sm ${
-          isUser
-            ? "bg-blue-600 text-white"
-            : "bg-yellow-500 text-gray-900"
+        className={`w-8 h-8 rounded-full border-2 border-yellow-200 shadow-lg flex items-center justify-center flex-shrink-0 text-sm ${
+          isUser ? "bg-blue-600 text-white" : "bg-yellow-500 text-gray-900"
         }`}
+        aria-label={isUser ? "用户" : "皮卡丘"}
       >
-        {isUser ? "👤" : "⚡"}
+        {isUser ? "你" : "P"}
       </div>
 
-      {/* 消息气泡 */}
-      <div
-        className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
-          isUser
-            ? "bg-blue-600 text-white rounded-tr-md"
-            : "bg-gray-800 text-gray-100 rounded-tl-md"
-        }`}
-      >
-        {isUser ? (
-          <p className="whitespace-pre-wrap">{message.content}</p>
-        ) : (
-          <div className="prose prose-invert prose-sm max-w-none">
-            <ReactMarkdown>{message.content}</ReactMarkdown>
-          </div>
-        )}
-        {isStreaming && (
-          <span className="inline-block w-2 h-4 bg-yellow-400 ml-1 animate-pulse" />
-        )}
+      <div className={`group flex max-w-[80%] flex-col gap-1 ${isUser ? "items-end" : "items-start"}`}>
+        <div
+          className={`rounded-2xl border-2 px-4 py-2.5 shadow-lg ${
+            isUser
+              ? "border-blue-200 bg-blue-600 text-white rounded-tr-md"
+              : "border-yellow-200 bg-gray-800 text-gray-100 rounded-tl-md"
+          }`}
+        >
+          {isUser ? (
+            <p className="whitespace-pre-wrap">{message.content}</p>
+          ) : (
+            <div className="markdown-body max-w-none">
+              <MarkdownContent content={message.content} />
+            </div>
+          )}
+          {isStreaming && (
+            <span className="ml-1 inline-block h-4 w-2 animate-pulse bg-yellow-400 align-middle" />
+          )}
+          {message.surface && <SurfaceRenderer surface={message.surface} onAction={onSurfaceAction} />}
+        </div>
+        <div className={`flex items-center gap-2 px-1 text-[11px] text-gray-500 ${isUser ? "flex-row-reverse" : ""}`}>
+          {timeLabel && <span>{timeLabel}</span>}
+          {message.content && !isStreaming && (
+            <button
+              type="button"
+              onClick={copyMessage}
+              className="opacity-0 transition-opacity hover:text-gray-300 group-hover:opacity-100 focus:opacity-100"
+            >
+              {copied ? "已复制" : "复制"}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -1,43 +1,224 @@
 import { create } from "zustand";
+import type { SurfaceSpec } from "../agent/surfaces";
 
 export type Message = {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
   createdAt: string;
-  surface?: unknown;
+  surface?: SurfaceSpec;
+};
+
+export type Conversation = {
+  id: string;
+  title: string;
+  messages: Message[];
+  createdAt: string;
+  updatedAt: string;
 };
 
 interface ChatState {
+  conversations: Conversation[];
+  activeConversationId: string;
   messages: Message[];
   addMessage: (msg: Omit<Message, "id" | "createdAt">) => void;
   updateLastAssistant: (content: string) => void;
+  removeMessage: (id: string) => void;
+  removeLastAssistant: () => void;
   clear: () => void;
+  createConversation: (title?: string) => string;
+  switchConversation: (id: string) => void;
+  renameConversation: (id: string, title: string) => void;
+  deleteConversation: (id: string) => void;
 }
 
+const LEGACY_KEY = "paw_messages";
+const STORAGE_KEY = "paw_conversations";
+const ACTIVE_KEY = "paw_active_conversation";
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function createEmptyConversation(title = "新对话"): Conversation {
+  const now = nowIso();
+  return {
+    id: `conv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    title,
+    messages: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function inferTitle(messages: Message[]) {
+  const firstUser = messages.find((message) => message.role === "user")?.content.trim();
+  if (!firstUser) return "新对话";
+  return firstUser.length > 18 ? `${firstUser.slice(0, 18)}...` : firstUser;
+}
+
+function saveConversations(conversations: Conversation[], activeConversationId: string) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+    localStorage.setItem(ACTIVE_KEY, activeConversationId);
+    const active = conversations.find((conversation) => conversation.id === activeConversationId);
+    localStorage.setItem(LEGACY_KEY, JSON.stringify(active?.messages || []));
+  } catch {}
+}
+
+function loadState(): Pick<ChatState, "conversations" | "activeConversationId" | "messages"> {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    const activeId = localStorage.getItem(ACTIVE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved) as Conversation[];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const active = parsed.find((conversation) => conversation.id === activeId) || parsed[0];
+        return { conversations: parsed, activeConversationId: active.id, messages: active.messages || [] };
+      }
+    }
+  } catch {}
+
+  try {
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    const messages = legacy ? JSON.parse(legacy) : [];
+    if (Array.isArray(messages) && messages.length > 0) {
+      const conversation = createEmptyConversation(inferTitle(messages));
+      conversation.messages = messages;
+      conversation.updatedAt = nowIso();
+      return { conversations: [conversation], activeConversationId: conversation.id, messages };
+    }
+  } catch {}
+
+  const conversation = createEmptyConversation();
+  return { conversations: [conversation], activeConversationId: conversation.id, messages: [] };
+}
+
+function withActiveConversation(
+  state: ChatState,
+  updater: (conversation: Conversation) => Conversation
+): Pick<ChatState, "conversations" | "messages"> {
+  let activeMessages: Message[] = state.messages;
+  const conversations = state.conversations.map((conversation) => {
+    if (conversation.id !== state.activeConversationId) return conversation;
+    const updated = updater(conversation);
+    activeMessages = updated.messages;
+    return updated;
+  });
+  saveConversations(conversations, state.activeConversationId);
+  return { conversations, messages: activeMessages };
+}
+
+const initialState = loadState();
+
 export const useChatStore = create<ChatState>((set, get) => ({
-  messages: [],
+  conversations: initialState.conversations,
+  activeConversationId: initialState.activeConversationId,
+  messages: initialState.messages,
 
   addMessage: (msg) => {
     const newMsg: Message = {
       ...msg,
       id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso(),
     };
-    set((s) => ({ messages: [...s.messages, newMsg] }));
+    set((state) =>
+      withActiveConversation(state, (conversation) => {
+        const messages = [...conversation.messages, newMsg];
+        const shouldRename = conversation.title === "新对话" && newMsg.role === "user";
+        return {
+          ...conversation,
+          title: shouldRename ? inferTitle(messages) : conversation.title,
+          messages,
+          updatedAt: nowIso(),
+        };
+      })
+    );
   },
 
   updateLastAssistant: (content) => {
-    const msgs = get().messages;
-    const last = msgs[msgs.length - 1];
-    if (last && last.role === "assistant") {
-      set({
-        messages: msgs.map((m) =>
-          m.id === last.id ? { ...m, content } : m
-        ),
-      });
-    }
+    set((state) =>
+      withActiveConversation(state, (conversation) => {
+        const last = conversation.messages[conversation.messages.length - 1];
+        if (!last || last.role !== "assistant") return conversation;
+        return {
+          ...conversation,
+          messages: conversation.messages.map((message) => (message.id === last.id ? { ...message, content } : message)),
+          updatedAt: nowIso(),
+        };
+      })
+    );
   },
 
-  clear: () => set({ messages: [] }),
+  removeMessage: (id) => {
+    set((state) =>
+      withActiveConversation(state, (conversation) => ({
+        ...conversation,
+        messages: conversation.messages.filter((message) => message.id !== id),
+        updatedAt: nowIso(),
+      }))
+    );
+  },
+
+  removeLastAssistant: () => {
+    set((state) =>
+      withActiveConversation(state, (conversation) => {
+        const reverseIndex = [...conversation.messages].reverse().findIndex((message) => message.role === "assistant");
+        if (reverseIndex < 0) return conversation;
+        const removeIndex = conversation.messages.length - 1 - reverseIndex;
+        return {
+          ...conversation,
+          messages: conversation.messages.filter((_, index) => index !== removeIndex),
+          updatedAt: nowIso(),
+        };
+      })
+    );
+  },
+
+  clear: () => {
+    set((state) =>
+      withActiveConversation(state, (conversation) => ({
+        ...conversation,
+        messages: [],
+        title: "新对话",
+        updatedAt: nowIso(),
+      }))
+    );
+  },
+
+  createConversation: (title = "新对话") => {
+    const conversation = createEmptyConversation(title);
+    const conversations = [conversation, ...get().conversations];
+    saveConversations(conversations, conversation.id);
+    set({ conversations, activeConversationId: conversation.id, messages: [] });
+    return conversation.id;
+  },
+
+  switchConversation: (id) => {
+    const conversation = get().conversations.find((item) => item.id === id);
+    if (!conversation) return;
+    saveConversations(get().conversations, id);
+    set({ activeConversationId: id, messages: conversation.messages || [] });
+  },
+
+  renameConversation: (id, title) => {
+    const nextTitle = title.trim() || "新对话";
+    const conversations = get().conversations.map((conversation) =>
+      conversation.id === id ? { ...conversation, title: nextTitle, updatedAt: nowIso() } : conversation
+    );
+    saveConversations(conversations, get().activeConversationId);
+    set({ conversations });
+  },
+
+  deleteConversation: (id) => {
+    const state = get();
+    if (state.conversations.length <= 1) {
+      state.clear();
+      return;
+    }
+    const conversations = state.conversations.filter((conversation) => conversation.id !== id);
+    const active = id === state.activeConversationId ? conversations[0] : conversations.find((item) => item.id === state.activeConversationId) || conversations[0];
+    saveConversations(conversations, active.id);
+    set({ conversations, activeConversationId: active.id, messages: active.messages || [] });
+  },
 }));
