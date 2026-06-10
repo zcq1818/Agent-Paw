@@ -16,7 +16,7 @@ import { usePetStore } from "../store/pet";
 import { useChatStore } from "../store/chat";
 import { useAgentStore } from "../store/agent";
 import { useThemeClass } from "../store/theme";
-import { useActivityMonitor, useActivityStore } from "../store/activity";
+import { useActivityMonitor, useActivityStore, checkAndDeliverYesterdaySummary } from "../store/activity";
 import { usePetProactivity } from "../agent/proactivity";
 import { fetchTodayNews, formatNewsBubble, formatNewsMarkdown } from "../agent/news";
 import { getInteractionByType, getRandomInteraction, getTimeBasedGreeting } from "../utils/petInteractions";
@@ -267,15 +267,13 @@ export function Pet() {
     [adjustLife, resetToDefaultState, setEmotion]
   );
 
-  useActivityMonitor(
-    useCallback(
-      (summary: string) => {
-        addMessage({ role: "assistant", content: summary });
-        speak("我整理了一下你最近的电脑活动，已经放到聊天里。", 5200);
-      },
-      [addMessage, speak]
-    )
-  );
+  useActivityMonitor();
+
+  // Deliver yesterday's activity summary on first launch of the day
+  useEffect(() => {
+    const getSummary = useActivityStore.getState().getSummary;
+    checkAndDeliverYesterdaySummary(getSummary, addMessage, speak);
+  }, [addMessage, speak]);
 
   usePetProactivity({
     shouldPauseMotion,
