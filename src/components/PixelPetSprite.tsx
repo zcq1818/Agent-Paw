@@ -1,4 +1,4 @@
-import { SKIN_COLORS, usePetStore, type PetAvatar } from "../store/pet";
+import { SKIN_COLORS, usePetStore, type PetAvatar, type PetSkin } from "../store/pet";
 
 type PetState = "idle" | "walk" | "sit" | "sleep" | "excited" | "thinking" | "morning" | "night" | "dance" | "stretch" | "look" | "wave";
 
@@ -7,6 +7,8 @@ interface PixelPetSpriteProps {
   state: PetState;
   size?: number;
   facing?: "left" | "right";
+  /** 传入时用该配色；不传则沿用桌宠全局皮肤（保持原行为）。 */
+  skin?: PetSkin;
 }
 
 type RectSpec = [number, number, number, number, string];
@@ -56,8 +58,8 @@ function commonFace(dark: string, cheek: string, state: PetState): RectSpec[] {
   ];
 }
 
-function pikachuRects(state: PetState): RectSpec[] {
-  const skin = usePetStore.getState().skin;
+function pikachuRects(state: PetState, skinOverride?: PetSkin): RectSpec[] {
+  const skin = skinOverride || usePetStore.getState().skin;
   const colors = SKIN_COLORS[skin];
   const body = colors.body;
   const shade = colors.dark;
@@ -136,14 +138,14 @@ function dogRects(state: PetState): RectSpec[] {
   ];
 }
 
-function getRects(avatar: PetAvatar, state: PetState): RectSpec[] {
+function getRects(avatar: PetAvatar, state: PetState, skin?: PetSkin): RectSpec[] {
   if (avatar === "pixel_cat") return catRects(state);
   if (avatar === "pixel_dog") return dogRects(state);
-  return pikachuRects(state);
+  return pikachuRects(state, skin);
 }
 
-export function PixelPetSprite({ avatar, state, size = 128, facing = "right" }: PixelPetSpriteProps) {
-  const rects = getRects(avatar, state);
+export function PixelPetSprite({ avatar, state, size = 128, facing = "right", skin }: PixelPetSpriteProps) {
+  const rects = getRects(avatar, state, skin);
   const sleeping = state === "sleep" || state === "night";
   const thinking = state === "thinking";
   const excited = state === "excited" || state === "morning" || state === "dance" || state === "wave";
