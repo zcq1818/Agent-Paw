@@ -7,6 +7,13 @@ export type TimeOfDay = "morning" | "afternoon" | "evening" | "night";
 export type InteractionFrequency = "rare" | "normal" | "frequent";
 export type RoamScope = "full" | "nearby" | "corner";
 
+/** 桌宠生命值：Pet.tsx 的 LifeBar 按 0-100 渲染。 */
+export interface LifeStats {
+  energy: number;
+  affection: number;
+  curiosity: number;
+}
+
 interface PetConfig {
   name: string;
   skin: PetSkin;
@@ -28,7 +35,10 @@ interface PetConfig {
 interface PetState extends PetConfig {
   emotion: Emotion;
   timeOfDay: TimeOfDay;
+  life: LifeStats;
   setEmotion: (emotion: Emotion) => void;
+  adjustLife: (delta: Partial<LifeStats>) => void;
+  tickLife: () => void;
   setName: (name: string) => void;
   setSkin: (skin: PetSkin) => void;
   setAvatar: (avatar: PetAvatar) => void;
@@ -45,6 +55,12 @@ interface PetState extends PetConfig {
   setQuietStart: (value: string) => void;
   setQuietEnd: (value: string) => void;
   refreshTimeOfDay: () => void;
+}
+
+const DEFAULT_LIFE: LifeStats = { energy: 80, affection: 60, curiosity: 55 };
+
+function clampLife(value: number): number {
+  return Math.max(0, Math.min(100, value));
 }
 
 export const SKIN_COLORS: Record<PetSkin, { body: string; dark: string; cheek: string }> = {
@@ -102,7 +118,7 @@ export const usePetStore = create<PetState>((set, get) => ({
   emotion: "idle",
   name: defaultConfig.name || "皮卡丘",
   skin: defaultConfig.skin || "yellow",
-  avatar: defaultConfig.avatar || "pixel_pikachu",
+  avatar: defaultConfig.avatar || "toon_pikachu",
   autoAction: defaultConfig.autoAction ?? true,
   enableInteractions: defaultConfig.enableInteractions ?? true,
   interactionFrequency: defaultConfig.interactionFrequency || "normal",
@@ -116,7 +132,24 @@ export const usePetStore = create<PetState>((set, get) => ({
   quietStart: defaultConfig.quietStart || "23:00",
   quietEnd: defaultConfig.quietEnd || "08:00",
   timeOfDay: getTimeOfDay(),
+  life: { ...DEFAULT_LIFE },
   setEmotion: (emotion) => set({ emotion }),
+  adjustLife: (delta) =>
+    set((state) => ({
+      life: {
+        energy: clampLife(state.life.energy + (delta.energy ?? 0)),
+        affection: clampLife(state.life.affection + (delta.affection ?? 0)),
+        curiosity: clampLife(state.life.curiosity + (delta.curiosity ?? 0)),
+      },
+    })),
+  tickLife: () =>
+    set((state) => ({
+      life: {
+        energy: clampLife(state.life.energy + 1.5),
+        affection: clampLife(state.life.affection - 0.2),
+        curiosity: clampLife(state.life.curiosity + 0.8),
+      },
+    })),
   setName: (name) => {
     set({ name });
     persist(get, { name });
