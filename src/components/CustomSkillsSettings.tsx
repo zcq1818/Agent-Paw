@@ -100,20 +100,35 @@ export function CustomSkillsSettings({ onClose }: CustomSkillsSettingsProps) {
     URL.revokeObjectURL(url);
   };
 
+  const handleExportMarkdown = (skill: CustomSkill) => {
+    const markdown = customSkillsStore.exportSkillMarkdown(skill.id);
+    if (!markdown) return;
+
+    const blob = new Blob([markdown], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${skill.name.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, "_")}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const isMarkdown = /\.(md|markdown)$/i.test(file.name);
     const reader = new FileReader();
     reader.onload = (event) => {
-      try {
-        const imported = customSkillsStore.importSkill(event.target?.result as string);
-        if (imported) {
-          refreshSkills();
-          alert(`成功导入技能：${imported.name}`);
-        }
-      } catch {
-        alert("导入失败，请检查文件格式。");
+      const content = event.target?.result as string;
+      const imported = isMarkdown
+        ? customSkillsStore.importSkillMarkdown(content)
+        : customSkillsStore.importSkill(content);
+      if (imported) {
+        refreshSkills();
+        alert(`成功导入技能：${imported.name}`);
+      } else {
+        alert("导入失败，请检查文件格式：需要技能 JSON 或 SKILL.md。");
       }
     };
     reader.readAsText(file);
@@ -133,7 +148,7 @@ export function CustomSkillsSettings({ onClose }: CustomSkillsSettingsProps) {
         <div className="flex items-center gap-2">
           <label className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg cursor-pointer text-sm transition-colors">
             导入
-            <input type="file" accept=".json" onChange={handleImport} className="hidden" />
+            <input type="file" accept=".json,.md,.markdown" onChange={handleImport} className="hidden" />
           </label>
           <button
             onClick={() => setShowAddForm(!showAddForm)}
@@ -259,6 +274,7 @@ export function CustomSkillsSettings({ onClose }: CustomSkillsSettingsProps) {
                 }}
                 onDelete={() => handleDelete(skill.id)}
                 onExport={() => handleExport(skill)}
+                onExportMarkdown={() => handleExportMarkdown(skill)}
               />
             ))
           )}
@@ -283,12 +299,14 @@ function SkillCard({
   onToggle,
   onDelete,
   onExport,
+  onExportMarkdown,
 }: {
   skill: CustomSkill;
   onEdit: () => void;
   onToggle: () => void;
   onDelete: () => void;
   onExport: () => void;
+  onExportMarkdown: () => void;
 }) {
   const category = CATEGORIES.find((item) => item.name === skill.category) || CATEGORIES[CATEGORIES.length - 1];
 
@@ -327,8 +345,11 @@ function SkillCard({
           <button onClick={onEdit} className="p-2 text-blue-400 hover:bg-blue-900/30 rounded-lg transition-colors" title="编辑">
             编辑
           </button>
-          <button onClick={onExport} className="p-2 text-purple-400 hover:bg-purple-900/30 rounded-lg transition-colors" title="导出">
-            导出
+          <button onClick={onExport} className="p-2 text-purple-400 hover:bg-purple-900/30 rounded-lg transition-colors" title="导出 JSON">
+            JSON
+          </button>
+          <button onClick={onExportMarkdown} className="p-2 text-purple-400 hover:bg-purple-900/30 rounded-lg transition-colors" title="导出 SKILL.md（可与 OpenMausBot / Agent Skills 互通）">
+            MD
           </button>
           <button onClick={onDelete} className="p-2 text-red-400 hover:bg-red-900/30 rounded-lg transition-colors" title="删除">
             删除

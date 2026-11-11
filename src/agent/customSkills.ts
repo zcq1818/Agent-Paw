@@ -181,6 +181,98 @@ class CustomSkillsStore {
       return 0;
     }
   }
+
+  /** 导出为带 YAML frontmatter 的 SKILL.md，与 OpenMausBot / Agent Skills 的文件格式对齐。 */
+  exportSkillMarkdown(id: string): string | undefined {
+    const skill = this.getById(id);
+    if (!skill) return undefined;
+
+    const quote = (value: string) =>
+      `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
+
+    const lines = [
+      "---",
+      `name: ${quote(skill.name)}`,
+      `description: ${quote(skill.description)}`,
+      `category: ${quote(skill.category)}`,
+      "permissions: []",
+      `tags: [${skill.tags.map(quote).join(", ")}]`,
+      "---",
+      "",
+      `# ${skill.name}`,
+      "",
+      skill.description,
+      "",
+      skill.instructions || "",
+    ];
+    if (skill.examples.length > 0) {
+      lines.push("", "## 示例", ...skill.examples.map((example) => `- ${example}`));
+    }
+    return `${lines.join("\n").trimEnd()}\n`;
+  }
+
+  /** 导入 SKILL.md：解析 frontmatter，正文作为 instructions；也兼容无 frontmatter 的纯 Markdown。 */
+  importSkillMarkdown(markdown: string): CustomSkill | undefined {
+    try {
+      const text = markdown.replace(/\r\n/g, "\n");
+      const match = /^---[ \t]*\n([\s\S]*?)\n---[ \t]*\n?/.exec(text);
+      const frontmatter: Record<string, string> = {};
+      let body = text;
+
+      if (match) {
+        match[1].split("\n").forEach((line) => {
+          const idx = line.indexOf(":");
+          if (idx < 1) return;
+          const key = line.slice(0, idx).trim();
+          let value = line.slice(idx + 1).trim();
+          if (value.startsWith('"') && value.endsWith('"')) {
+            value = value.slice(1, -1).replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+          }
+          frontmatter[key] = value;
+        });
+        body = text.slice(match[0].length);
+      }
+
+      const parseTags = (raw?: string): string[] =>
+        (raw || "")
+          .replace(/^\[|\]$/g, "")
+          .split(",")
+          .map((tag) => tag.trim().replace(/^"|"$/g, ""))
+          .filter(Boolean);
+
+      const examples: string[] = [];
+      const exampleIndex = body.search(/^##\s*示例\s*$/m);
+      let instructionBody = body;
+      if (exampleIndex >= 0) {
+        instructionBody = body.slice(0, exampleIndex);
+        body
+          .slice(exampleIndex)
+          .split("\n")
+          .forEach((line) => {
+            const item = /^-\s+(.+)$/.exec(line.trim());
+            if (item) examples.push(item[1].trim());
+          });
+      }
+      instructionBody = instructionBody.replace(/^#\s+.*\n/, "").trim();
+
+      const name = frontmatter.name || /^#\s+(.+)$/m.exec(text)?.[1]?.trim() || "";
+      if (!name) return undefined;
+      const description =
+        frontmatter.description || instructionBody.split("\n")[0]?.trim() || name;
+
+      return this.create({
+        name,
+        description: description.slice(0, 200),
+        category: frontmatter.category || "其他",
+        instructions: instructionBody,
+        examples,
+        tags: parseTags(frontmatter.tags),
+        active: true,
+      });
+    } catch {
+      return undefined;
+    }
+  }
 }
 
 export const customSkillsStore = new CustomSkillsStore();

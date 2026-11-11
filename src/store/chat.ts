@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import type { SurfaceSpec } from "../agent/surfaces";
+import { scopeKey } from "../agent/scope";
+import type { ToolRun } from "../agent/toolEvents";
 
 export type Message = {
   id: string;
@@ -7,6 +9,8 @@ export type Message = {
   content: string;
   createdAt: string;
   surface?: SurfaceSpec;
+  /** 这条回复期间发生的结构化工具调用。 */
+  toolRuns?: ToolRun[];
 };
 
 export type Conversation = {
@@ -30,11 +34,22 @@ interface ChatState {
   switchConversation: (id: string) => void;
   renameConversation: (id: string, title: string) => void;
   deleteConversation: (id: string) => void;
+  /** 切换 Bot 后重新载入该 Bot 的会话分区。 */
+  hydrateForBot: () => void;
 }
 
 const LEGACY_KEY = "paw_messages";
 const STORAGE_KEY = "paw_conversations";
 const ACTIVE_KEY = "paw_active_conversation";
+
+/** 默认 Bot 沿用原始 key；其他 Bot 各用一份独立分区。 */
+function getKeys() {
+  return {
+    storage: scopeKey(STORAGE_KEY),
+    active: scopeKey(ACTIVE_KEY),
+    legacy: scopeKey(LEGACY_KEY),
+  };
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -59,17 +74,19 @@ function inferTitle(messages: Message[]) {
 
 function saveConversations(conversations: Conversation[], activeConversationId: string) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
-    localStorage.setItem(ACTIVE_KEY, activeConversationId);
+    const keys = getKeys();
+    localStorage.setItem(keys.storage, JSON.stringify(conversations));
+    localStorage.setItem(keys.active, activeConversationId);
     const active = conversations.find((conversation) => conversation.id === activeConversationId);
-    localStorage.setItem(LEGACY_KEY, JSON.stringify(active?.messages || []));
+    localStorage.setItem(keys.legacy, JSON.stringify(active?.messages || []));
   } catch {}
 }
 
 function loadState(): Pick<ChatState, "conversations" | "activeConversationId" | "messages"> {
+  const keys = getKeys();
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    const activeId = localStorage.getItem(ACTIVE_KEY);
+    const saved = localStorage.getItem(keys.storage);
+    const activeId = localStorage.getItem(keys.active);
     if (saved) {
       const parsed = JSON.parse(saved) as Conversation[];
       if (Array.isArray(parsed) && parsed.length > 0) {
@@ -80,7 +97,7 @@ function loadState(): Pick<ChatState, "conversations" | "activeConversationId" |
   } catch {}
 
   try {
-    const legacy = localStorage.getItem(LEGACY_KEY);
+    const legacy = localStorage.getItem(keys.legacy);
     const messages = legacy ? JSON.parse(legacy) : [];
     if (Array.isArray(messages) && messages.length > 0) {
       const conversation = createEmptyConversation(inferTitle(messages));
@@ -221,4 +238,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
     saveConversations(conversations, active.id);
     set({ conversations, activeConversationId: active.id, messages: active.messages || [] });
   },
+
+  hydrateForBot: () => set(loadState()),
 }));
