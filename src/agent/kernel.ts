@@ -5,6 +5,8 @@ import { getMultimodalTools } from "./multimodal";
 import { personalityStore } from "./personality";
 import { securityManager } from "./security";
 import { getSkillsContext } from "./customSkills";
+import type { ToolEvent } from "./toolEvents";
+import { getActiveBot, useBotStore, type BotModelOverride } from "../store/bots";
 
 export type ProviderId = "agnes" | "openai" | "deepseek" | "openrouter" | "custom" | string;
 
@@ -74,6 +76,18 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     maxTokens: 4096,
   },
   {
+    id: "anthropic",
+    label: "Anthropic Claude",
+    baseUrl: "https://api.anthropic.com/v1",
+    model: "claude-3-5-sonnet-20241022",
+    stream: false,
+    enableTools: false,
+    temperature: 0.7,
+    maxTokens: 4096,
+    apiKeyPlaceholder: "Anthropic API Key",
+    notes: "Uses the Anthropic Messages API (/v1/messages), not OpenAI Chat Completions.",
+  },
+  {
     id: "openrouter",
     label: "OpenRouter",
     baseUrl: "https://openrouter.ai/api/v1",
@@ -141,7 +155,8 @@ export function normalizeConfig(config: Partial<AgentConfig>): AgentConfig {
   };
 }
 
-export function loadConfig(): AgentConfig {
+/** 全局配置：不含任何 Bot 覆盖，供设置页保存时使用。 */
+function loadGlobalConfig(): AgentConfig {
   try {
     const saved = localStorage.getItem("paw_config");
     if (saved) return normalizeConfig(JSON.parse(saved));
@@ -149,8 +164,27 @@ export function loadConfig(): AgentConfig {
   return normalizeConfig(DEFAULT_CONFIG);
 }
 
+/** 取指定 Bot 的生效配置：全局配置 + 该 Bot 的模型覆盖。Rooms 按 Bot 分别调用时使用。 */
+export function configForBot(bot?: { modelOverride?: BotModelOverride }): AgentConfig {
+  const patch: Partial<AgentConfig> = {};
+  const override = bot?.modelOverride;
+  if (override) {
+    if (override.provider) patch.provider = override.provider;
+    if (override.model) patch.model = override.model;
+    if (override.baseUrl) patch.baseUrl = override.baseUrl;
+    if (override.apiKey) patch.apiKey = override.apiKey;
+  }
+  return normalizeConfig({ ...loadGlobalConfig(), ...patch });
+}
+
+/** 生效配置 = 全局配置 + 当前 Bot 的模型覆盖。 */
+export function loadConfig(): AgentConfig {
+  return configForBot(getActiveBot(useBotStore.getState()));
+}
+
 export function saveConfig(config: Partial<AgentConfig>) {
-  const current = loadConfig();
+  // 刻意不用 loadConfig()，否则会把当前 Bot 的覆盖写进全局配置。
+  const current = loadGlobalConfig();
   localStorage.setItem("paw_config", JSON.stringify(normalizeConfig({ ...current, ...config })));
 }
 
@@ -174,6 +208,29 @@ export function buildRequestHeaders(config: AgentConfig): Record<string, string>
   if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
   Object.assign(headers, parseConfigJson(config.extraHeaders) as Record<string, string>);
   return headers;
+}
+
+/** Anthropic 用的是 Messages API，与 OpenAI Chat Completions 不兼容。 */
+export function isAnthropicProvider(config: Pick<AgentConfig, "provider" | "baseUrl">): boolean {
+  return config.provider === "anthropic" || /api\.anthropic\.com/i.test(config.baseUrl || "");
+}
+
+export function buildAnthropicRequest(config: AgentConfig, system: string, prompt: string) {
+  return {
+    url: `${normalizeBaseUrl(config.baseUrl)}/messages`,
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": config.apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: {
+      model: config.model,
+      max_tokens: config.maxTokens ?? 4096,
+      temperature: config.temperature ?? 0.7,
+      system,
+      messages: [{ role: "user", content: prompt }],
+    },
+  };
 }
 
 export function getEmbeddingModel(config = loadConfig()): string {
@@ -235,6 +292,11 @@ Agent 行为准则：
 
   if (config.enablePersonality !== false) {
     prompt += personalityStore.getPersonalizedContext();
+  }
+
+  const activeBot = getActiveBot(useBotStore.getState());
+  if (activeBot) {
+    prompt += `\n\n## 当前 Bot 身份\n你现在的身份是「${activeBot.name}」${activeBot.tagline ? `（${activeBot.tagline}）` : ""}。\n${activeBot.instructions || "沿用上方默认人设与行为准则。"}\n权限级别：${activeBot.approvalLevel}。当 Bot 指令与上方默认人设冲突时，以本节 Bot 指令为准。`;
   }
 
   prompt += `
@@ -434,34 +496,53 @@ async function executeRuntimeToolCalls(
   toolCalls: RuntimeToolCall[],
   tools: Tool[],
   currentMessages: any[],
-  onChunk: (text: string) => void
+  onToolEvent?: (event: ToolEvent) => void
 ) {
-  for (const tc of toolCalls) {
+  for (const [index, tc] of toolCalls.entries()) {
     const tool = tools.find((item) => item.name === tc.name);
-    onChunk(`\n正在执行 ${tc.name}...\n`);
+    const runId = tc.id || `${tc.name}-${index}-${Date.now()}`;
+    const startedAt = Date.now();
+    onToolEvent?.({
+      type: "start",
+      id: runId,
+      name: tc.name,
+      args: tc.arguments || "{}",
+      at: startedAt,
+    });
     securityManager.log("info", "tool", `Executing tool: ${tc.name}`);
 
+    let result = "";
+    let status: "done" | "error" = "done";
     try {
       const args = JSON.parse(tc.arguments || "{}");
-      const { success, result } = await securityManager.safeExecuteTool(tc.name, async () => {
+      const executed = await securityManager.safeExecuteTool(tc.name, async () => {
         if (!tool) throw new Error(`未找到工具 ${tc.name}`);
         return await tool.execute(args);
       });
-      onChunk(`${success ? "完成" : "失败"}: ${result}\n`);
-      currentMessages.push({ role: "tool", tool_call_id: tc.id, content: result });
+      result = executed.result;
+      status = executed.success ? "done" : "error";
     } catch (e) {
-      const err = `工具执行失败: ${e}`;
-      onChunk(`失败: ${err}\n`);
+      result = `工具执行失败: ${e}`;
+      status = "error";
       securityManager.log("error", "tool", `Tool execution failed: ${tc.name}`, { error: String(e) });
-      currentMessages.push({ role: "tool", tool_call_id: tc.id, content: err });
     }
+
+    onToolEvent?.({
+      type: "finish",
+      id: runId,
+      name: tc.name,
+      status,
+      result,
+      at: Date.now(),
+    });
+    currentMessages.push({ role: "tool", tool_call_id: tc.id, content: result });
   }
 }
 
 export async function streamChat(
   request: ChatRequest,
   onChunk: (text: string) => void,
-  options: { signal?: AbortSignal } = {}
+  options: { signal?: AbortSignal; onToolEvent?: (event: ToolEvent) => void } = {}
 ): Promise<string> {
   const config = loadConfig();
   if (!config.apiKey) throw new Error("请先在设置中配置 API Key");
@@ -600,7 +681,7 @@ export async function streamChat(
           function: { name: tc.name, arguments: tc.arguments },
         })),
       });
-      await executeRuntimeToolCalls(nonStreamToolCalls, tools, currentMessages, onChunk);
+      await executeRuntimeToolCalls(nonStreamToolCalls, tools, currentMessages, options.onToolEvent);
       continue;
     }
 
@@ -663,7 +744,7 @@ export async function streamChat(
       })),
     });
 
-    await executeRuntimeToolCalls(toolCalls, tools, currentMessages, onChunk);
+    await executeRuntimeToolCalls(toolCalls, tools, currentMessages, options.onToolEvent);
   }
 
   if (config.enableMemory !== false && (fullText.length > 30 || userText.length > 8)) {

@@ -10,13 +10,17 @@ import { CustomSkillsSettings } from "./CustomSkillsSettings";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { MemoryPanel } from "./MemoryPanel";
 import { ProductivityPanel } from "./ProductivityPanel";
+import { BotRoster } from "./BotRoster";
+import { RoomPanel } from "./RoomPanel";
+import { ChiefPanel } from "./ChiefPanel";
+import { useBotStore } from "../store/bots";
 
 interface ChatPanelProps {
   onOpenSettings: () => void;
   onBack: () => void;
 }
 
-type PanelView = "chat" | "memory" | "skills" | "tasks" | "activity" | "logs";
+type PanelView = "chat" | "team" | "rooms" | "chief" | "memory" | "skills" | "tasks" | "activity" | "logs";
 
 const QUICK_PROMPTS = [
   "你能做什么？",
@@ -28,6 +32,9 @@ const QUICK_PROMPTS = [
 
 const WORKBENCH_TABS: Array<{ view: PanelView | "settings"; label: string }> = [
   { view: "chat", label: "聊天" },
+  { view: "team", label: "团队" },
+  { view: "rooms", label: "房间" },
+  { view: "chief", label: "总管" },
   { view: "memory", label: "记忆" },
   { view: "skills", label: "Skills" },
   { view: "tasks", label: "任务" },
@@ -52,11 +59,16 @@ export function ChatPanel({ onOpenSettings, onBack }: ChatPanelProps) {
   const deleteConversation = useChatStore((state) => state.deleteConversation);
   const isStreaming = useAgentStore((state) => state.isStreaming);
   const streamText = useAgentStore((state) => state.streamText);
+  const currentToolRuns = useAgentStore((state) => state.currentToolRuns);
+  const runningToolName = [...currentToolRuns].reverse().find((run) => run.status === "running")?.name;
   const sendMessage = useAgentStore((state) => state.sendMessage);
   const stopGeneration = useAgentStore((state) => state.stopGeneration);
   const retryLast = useAgentStore((state) => state.retryLast);
   const continueLast = useAgentStore((state) => state.continueLast);
   const setEmotion = usePetStore((state) => state.setEmotion);
+  const activeBotName = useBotStore(
+    (state) => state.bots.find((bot) => bot.id === state.activeBotId)?.name || "皮卡丘"
+  );
 
   const setChatActive = useCallback(async (active: boolean) => {
     try {
@@ -120,6 +132,9 @@ export function ChatPanel({ onOpenSettings, onBack }: ChatPanelProps) {
     URL.revokeObjectURL(url);
   };
 
+  if (panelView === "team") return <BotRoster onClose={() => setPanelView("chat")} />;
+  if (panelView === "rooms") return <RoomPanel onClose={() => setPanelView("chat")} />;
+  if (panelView === "chief") return <ChiefPanel onClose={() => setPanelView("chat")} />;
   if (panelView === "memory") return <MemoryPanel onClose={() => setPanelView("chat")} />;
   if (panelView === "skills") return <CustomSkillsSettings onClose={() => setPanelView("chat")} />;
   if (panelView === "tasks") return <ProductivityPanel onClose={() => setPanelView("chat")} />;
@@ -147,6 +162,7 @@ export function ChatPanel({ onOpenSettings, onBack }: ChatPanelProps) {
               <div className="flex items-center gap-2">
                 <span className="text-xl">⚡</span>
                 <span className="font-semibold text-white">Paw 工作台</span>
+                <span className="bg-yellow-500/15 px-2 py-0.5 text-xs text-yellow-300">{activeBotName}</span>
                 <span className="bg-green-400/10 px-2 py-0.5 text-xs text-green-400">在线</span>
               </div>
               <div className="text-xs text-gray-400">聊天、记忆、技能和系统动作分开管理。</div>
@@ -154,7 +170,7 @@ export function ChatPanel({ onOpenSettings, onBack }: ChatPanelProps) {
           </div>
         </div>
 
-        <div className="grid grid-cols-4 gap-2 text-xs sm:grid-cols-7">
+        <div className="grid grid-cols-4 gap-2 text-xs sm:grid-cols-10">
           {WORKBENCH_TABS.map((tab) => (
             <button
               key={tab.view}
@@ -240,6 +256,7 @@ export function ChatPanel({ onOpenSettings, onBack }: ChatPanelProps) {
               role: "assistant",
               content: streamText || "Paw 正在思考...",
               createdAt: new Date().toISOString(),
+              toolRuns: currentToolRuns,
             }}
             isStreaming
           />
@@ -266,7 +283,11 @@ export function ChatPanel({ onOpenSettings, onBack }: ChatPanelProps) {
               继续回答
             </button>
           </div>
-          {isStreaming && <span className="text-xs text-yellow-300">正在生成...</span>}
+          {isStreaming && (
+            <span className="text-xs text-yellow-300">
+              {runningToolName ? `正在调用 ${runningToolName}...` : "正在生成..."}
+            </span>
+          )}
         </div>
         <div className="flex gap-2">
           <textarea

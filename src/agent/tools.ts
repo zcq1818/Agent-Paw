@@ -4,6 +4,9 @@ import { open } from "@tauri-apps/plugin-shell";
 import { customSkillsStore } from "./customSkills";
 import { fetchTodayNews, formatNewsMarkdown } from "./news";
 import { useActivityStore } from "../store/activity";
+import { useBotStore } from "../store/bots";
+import type { ApprovalKind } from "../store/bots";
+import { emitToolEvent } from "./toolEvents";
 
 export interface Tool {
   name: string;
@@ -55,9 +58,59 @@ function writeJson(key: string, value: unknown) {
   } catch {}
 }
 
-function confirmSystemAction(message: string) {
-  if (typeof window === "undefined" || typeof window.confirm !== "function") return true;
-  return window.confirm(`${message}\n\n确认执行吗？`);
+/**
+ * 外部动作确认：走内联审批卡片，替代原来的 window.confirm 弹窗。
+ * 卡片由 ApprovalOverlay 渲染；无人应答时 120 秒后自动拒绝，避免工具调用被永久挂住。
+ */
+function confirmSystemAction(message: string, kind: ApprovalKind = "shell"): Promise<boolean> {
+  if (typeof window === "undefined") return Promise.resolve(true);
+
+  const store = useBotStore.getState();
+  const id = store.requestApproval({
+    botId: store.activeBotId || "bot_default_paw",
+    threadId: store.activeThreadId || "",
+    kind,
+    summary: message.split("\n")[0] || "需要确认外部动作",
+    detail: message,
+  });
+  emitToolEvent({
+    type: "approval",
+    id,
+    status: "pending",
+    detail: message.split("\n")[0] || "需要确认外部动作",
+    at: Date.now(),
+  });
+
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    let unsubscribe = () => {};
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (allowed: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      unsubscribe();
+      emitToolEvent({
+        type: "approval",
+        id,
+        status: allowed ? "done" : "error",
+        detail: allowed ? "已允许" : "已拒绝或超时",
+        at: Date.now(),
+      });
+      resolve(allowed);
+    };
+
+    unsubscribe = useBotStore.subscribe((state) => {
+      const request = state.approvals.find((item) => item.id === id);
+      if (request && request.status !== "pending") finish(request.status === "allowed");
+    });
+
+    timer = setTimeout(() => {
+      useBotStore.getState().resolveApproval(id, "denied");
+      finish(false);
+    }, 120000);
+  });
 }
 
 class TodoStore {
@@ -569,9 +622,35 @@ const systemTools: Tool[] = [
     execute: async (args) => {
       const url = String(args.url || "");
       if (!url.startsWith("http")) return "请输入完整 URL";
-      if (!confirmSystemAction(`皮卡准备打开网页：${url}`)) return "已取消打开网页。";
+      if (!(await confirmSystemAction(`皮卡准备打开网页：${url}`, "network"))) return "已取消打开网页。";
       await open(url);
       return `正在打开：${url}`;
+    },
+  },
+  {
+    name: "delegate_task",
+    description: "把任务下发给专家模型（DeepSeek / Claude / 本地模型）并行执行并汇总，桌面宠物作为大总管",
+    parameters: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "要委派的任务；多段用分号或换行分隔可分给不同专家" },
+        mode: { type: "string", enum: ["parallel", "review"], description: "parallel=各自完成，review=各自复核挑错" },
+      },
+      required: ["task"],
+    },
+    execute: async (args) => {
+      const task = String(args.task || "").trim();
+      if (!task) return "请提供要下发的任务。";
+      // 动态 import 打破 tools -> kernel -> tools 的循环依赖。
+      const { useExpertStore } = await import("../store/experts");
+      const { planDelegation, runDelegation, formatDelegationReport } = await import("./orchestrator");
+      const mode = args.mode === "review" ? ("review" as const) : ("parallel" as const);
+      const tasks = planDelegation(task, useExpertStore.getState().experts, mode);
+      if (tasks.length === 0) {
+        return "没有可用专家。请先到「总管」面板启用专家并填写对应的 API Key。";
+      }
+      const results = await runDelegation(tasks);
+      return formatDelegationReport(results);
     },
   },
   {
@@ -587,7 +666,7 @@ const systemTools: Tool[] = [
     execute: async (args) => {
       const target = String(args.target || "");
       if (!target.trim()) return "请提供要打开的应用或路径";
-      if (!confirmSystemAction(`皮卡准备打开：${target}`)) return "已取消打开应用。";
+      if (!(await confirmSystemAction(`皮卡准备打开：${target}`))) return "已取消打开应用。";
       try {
         return await invoke<string>("launch_app", { target });
       } catch (error) {
@@ -613,7 +692,7 @@ const systemTools: Tool[] = [
     execute: async (args) => {
       const action = String(args.action || "");
       const target = args.target ? String(args.target) : "";
-      if (!confirmSystemAction(`皮卡准备执行系统动作：${action}${target ? `\n目标：${target}` : ""}`)) {
+      if (!(await confirmSystemAction(`皮卡准备执行系统动作：${action}${target ? `\n目标：${target}` : ""}`))) {
         return "已取消系统动作。";
       }
       try {

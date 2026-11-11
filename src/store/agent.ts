@@ -8,11 +8,14 @@ import { customSkillsStore } from "../agent/customSkills";
 import { createHelpSurface, createSystemSurface, createTaskSurface, type SurfaceSpec } from "../agent/surfaces";
 import { fetchTodayNews, formatNewsMarkdown, markTodayNewsPushed, shouldPushTodayNews } from "../agent/news";
 import { useActivityStore } from "./activity";
+import { reduceToolRuns, subscribeToolEvents, type ToolEvent, type ToolRun } from "../agent/toolEvents";
 
 interface AgentState {
   isStreaming: boolean;
   streamText: string;
   error: string | null;
+  /** 本次回复期间实时累积的工具调用，供流式气泡展示。 */
+  currentToolRuns: ToolRun[];
   sendMessage: (text: string) => Promise<void>;
   stopGeneration: () => void;
   retryLast: () => Promise<void>;
@@ -235,11 +238,12 @@ export const useAgentStore = create<AgentState>((set) => ({
   isStreaming: false,
   streamText: "",
   error: null,
+  currentToolRuns: [],
 
   sendMessage: async (text: string) => {
     activeController?.abort();
     activeController = new AbortController();
-    set({ isStreaming: true, streamText: "", error: null });
+    set({ isStreaming: true, streamText: "", error: null, currentToolRuns: [] });
     notifyPet("pet-thinking");
 
     const addMessage = useChatStore.getState().addMessage;
@@ -248,6 +252,11 @@ export const useAgentStore = create<AgentState>((set) => ({
       role: message.role,
       content: message.content,
     }));
+    let toolRuns: ToolRun[] = [];
+    const unsubscribeToolEvents = subscribeToolEvents((event) => {
+      toolRuns = reduceToolRuns(toolRuns, event);
+      set({ currentToolRuns: [...toolRuns] });
+    });
 
     try {
       const memoryResult = await tryHandleMemoryCommand(text);
@@ -303,11 +312,17 @@ export const useAgentStore = create<AgentState>((set) => ({
         (chunk) => {
           set((state) => ({ streamText: state.streamText + chunk }));
         },
-        { signal: activeController.signal }
+        {
+          signal: activeController.signal,
+          onToolEvent: (event: ToolEvent) => {
+            toolRuns = reduceToolRuns(toolRuns, event);
+            set({ currentToolRuns: [...toolRuns] });
+          },
+        }
       );
 
-      addMessage({ role: "assistant", content: fullText });
-      set({ streamText: "" });
+      addMessage({ role: "assistant", content: fullText, toolRuns });
+      set({ streamText: "", currentToolRuns: [] });
       notifyPet("pet-say", { message: summarizeForBubble(fullText) });
 
       if (isAcknowledgementResponse(fullText) || /新闻|热点|今天有什么|今日新闻/.test(text)) {
@@ -316,8 +331,8 @@ export const useAgentStore = create<AgentState>((set) => ({
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === "AbortError") {
         const partial = useAgentStore.getState().streamText.trim();
-        if (partial) addMessage({ role: "assistant", content: `${partial}\n\n[已停止]` });
-        set({ streamText: "", error: null });
+        if (partial) addMessage({ role: "assistant", content: `${partial}\n\n[已停止]`, toolRuns });
+        set({ streamText: "", error: null, currentToolRuns: [] });
         notifyPet("pet-say", { message: "已停止回复。" });
         return;
       }
@@ -328,8 +343,9 @@ export const useAgentStore = create<AgentState>((set) => ({
       addMessage({ role: "assistant", content: message });
       notifyPet("pet-say", { message: `皮卡... ${errorMsg}` });
     } finally {
+      unsubscribeToolEvents();
       activeController = null;
-      set({ isStreaming: false });
+      set({ isStreaming: false, currentToolRuns: [] });
     }
   },
 

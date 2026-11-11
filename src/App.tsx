@@ -2,6 +2,9 @@ import { Suspense, lazy, useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { useChatHotkeyRegistration } from "./store/shortcut";
+import { useBotRosterSync } from "./store/bots";
+import { ApprovalOverlay } from "./components/ApprovalOverlay";
+import { useBotScopeSync } from "./agent/botScopeSync";
 
 type MainView = "chat" | "settings";
 
@@ -21,11 +24,15 @@ export default function App() {
     try {
       setWindowLabel(getCurrentWindow().label);
     } catch {
-      setWindowLabel("pet");
+      // 浏览器 dev 预览没有 Tauri 运行时；?window=main 可直接查看工作台。
+      const forced = new URLSearchParams(window.location.search).get("window");
+      setWindowLabel(forced === "main" ? "main" : "pet");
     }
   }, []);
 
   useChatHotkeyRegistration(windowLabel === "pet");
+  useBotRosterSync();
+  useBotScopeSync();
 
   useEffect(() => {
     if (windowLabel !== "main") return;
@@ -58,26 +65,25 @@ export default function App() {
     );
   }
 
-  if (mainView === "settings") {
-    return (
-      <Suspense fallback={<LoadingShell />}>
-        <Settings onBack={() => setMainView("chat")} />
-      </Suspense>
-    );
-  }
-
   return (
-    <Suspense fallback={<LoadingShell />}>
-      <ChatPanel
-        onOpenSettings={() => setMainView("settings")}
-        onBack={() => {
-          try {
-            getCurrentWindow().hide();
-          } catch {
-            // Browser dev fallback.
-          }
-        }}
-      />
-    </Suspense>
+    <>
+      <Suspense fallback={<LoadingShell />}>
+        {mainView === "settings" ? (
+          <Settings onBack={() => setMainView("chat")} />
+        ) : (
+          <ChatPanel
+            onOpenSettings={() => setMainView("settings")}
+            onBack={() => {
+              try {
+                getCurrentWindow().hide();
+              } catch {
+                // Browser dev fallback.
+              }
+            }}
+          />
+        )}
+      </Suspense>
+      <ApprovalOverlay />
+    </>
   );
 }

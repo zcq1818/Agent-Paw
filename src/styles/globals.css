@@ -179,6 +179,48 @@ select {
   color: var(--ui-text);
 }
 
+/* 新增面板共用的主题表面：颜色全部取自 .themed-ui / .chat-window.theme-* 变量 */
+.ui-panel {
+  background: var(--ui-surface);
+  border-color: var(--ui-border);
+  color: var(--ui-text);
+}
+.ui-panel-strong {
+  background: var(--ui-surface-strong);
+  border-color: var(--ui-border);
+  color: var(--ui-text);
+}
+.ui-muted {
+  color: var(--ui-muted);
+}
+
+/* 流式回复：尾部逐字淡入 + 呼吸光标 */
+.stream-tail > span {
+  display: inline-block;
+  animation: streamCharIn 0.34s ease-out both;
+}
+@keyframes streamCharIn {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
+.stream-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: var(--ui-accent, #f2d76b);
+  animation: streamCaret 1s steps(1, end) infinite;
+}
+@keyframes streamCaret {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stream-tail > span,
+  .stream-caret { animation: none; }
+}
+
 .chat-window.theme-cozy {
   --ui-surface: rgba(42, 48, 66, 0.78);
   --ui-surface-strong: rgba(27, 31, 44, 0.92);

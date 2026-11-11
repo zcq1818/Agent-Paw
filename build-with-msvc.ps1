@@ -1,6 +1,12 @@
 # Build script that sets MSVC environment and runs Tauri build
 
-$msvcBase = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207"
+$msvcRoot = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC"
+$msvcVersion = Get-ChildItem $msvcRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+if (-not $msvcVersion) {
+    Write-Error "未找到 MSVC 工具集：$msvcRoot"
+    exit 1
+}
+$msvcBase = $msvcVersion.FullName
 $linkPath = "$msvcBase\bin\Hostx64\x64"
 $sdkBase = "C:\Program Files (x86)\Windows Kits\10"
 
@@ -54,5 +60,6 @@ Write-Host ""
 Write-Host "Environment configured. Starting Tauri build..."
 Write-Host ""
 
-Set-Location "e:\cn\zhuomiancc\chongwu"
+Set-Location $PSScriptRoot
 node build-tauri.js
+exit $LASTEXITCODE

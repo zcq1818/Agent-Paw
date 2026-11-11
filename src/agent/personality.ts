@@ -7,6 +7,7 @@
 
 import { memoryStore } from "./memory";
 import { todoStore } from "./tools";
+import { scopeKey } from "./scope";
 
 export interface UserProfile {
   id: string;
@@ -53,6 +54,7 @@ export interface SmartSuggestion {
 
 const PROFILE_KEY = "paw_user_profile";
 const BEHAVIOR_KEY = "paw_behavior_events";
+const CLEANUP_KEY = "paw_behavior_cleanup";
 
 class PersonalityStore {
   private profile: UserProfile;
@@ -64,7 +66,7 @@ class PersonalityStore {
 
   private loadProfile(): UserProfile {
     try {
-      const saved = localStorage.getItem(PROFILE_KEY);
+      const saved = localStorage.getItem(scopeKey(PROFILE_KEY));
       if (saved) return JSON.parse(saved);
     } catch {}
     return this.createDefaultProfile();
@@ -98,7 +100,12 @@ class PersonalityStore {
   }
 
   private saveProfile(): void {
-    localStorage.setItem(PROFILE_KEY, JSON.stringify(this.profile));
+    localStorage.setItem(scopeKey(PROFILE_KEY), JSON.stringify(this.profile));
+  }
+
+  /** 切换 Bot 后重新载入该 Bot 分区里的用户画像。 */
+  reloadForActiveBot(): void {
+    this.profile = this.loadProfile();
   }
 
   getProfile(): UserProfile {
@@ -153,29 +160,29 @@ class PersonalityStore {
   }
 
   private initBehaviorTracking(): void {
-    const lastCleanup = localStorage.getItem("paw_behavior_cleanup");
+    const lastCleanup = localStorage.getItem(scopeKey(CLEANUP_KEY));
     const now = Date.now();
     if (!lastCleanup || now - parseInt(lastCleanup) > 24 * 60 * 60 * 1000) {
       this.cleanupOldEvents();
-      localStorage.setItem("paw_behavior_cleanup", now.toString());
+      localStorage.setItem(scopeKey(CLEANUP_KEY), now.toString());
     }
   }
 
   private cleanupOldEvents(): void {
     try {
-      const saved = localStorage.getItem(BEHAVIOR_KEY);
+      const saved = localStorage.getItem(scopeKey(BEHAVIOR_KEY));
       if (!saved) return;
 
       const events: BehaviorEvent[] = JSON.parse(saved);
       const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
       const recent = events.filter((event) => new Date(event.timestamp).getTime() > oneWeekAgo);
-      localStorage.setItem(BEHAVIOR_KEY, JSON.stringify(recent));
+      localStorage.setItem(scopeKey(BEHAVIOR_KEY), JSON.stringify(recent));
     } catch {}
   }
 
   trackEvent(type: BehaviorEvent["type"], action: string, metadata?: Record<string, unknown>): void {
     try {
-      const saved = localStorage.getItem(BEHAVIOR_KEY);
+      const saved = localStorage.getItem(scopeKey(BEHAVIOR_KEY));
       const events: BehaviorEvent[] = saved ? JSON.parse(saved) : [];
       events.push({
         id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -184,13 +191,13 @@ class PersonalityStore {
         metadata,
         timestamp: new Date().toISOString(),
       });
-      localStorage.setItem(BEHAVIOR_KEY, JSON.stringify(events.slice(-1000)));
+      localStorage.setItem(scopeKey(BEHAVIOR_KEY), JSON.stringify(events.slice(-1000)));
     } catch {}
   }
 
   getRecentEvents(limit = 20): BehaviorEvent[] {
     try {
-      const saved = localStorage.getItem(BEHAVIOR_KEY);
+      const saved = localStorage.getItem(scopeKey(BEHAVIOR_KEY));
       if (!saved) return [];
       const events: BehaviorEvent[] = JSON.parse(saved);
       return events.slice(-limit).reverse();

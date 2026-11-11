@@ -6,6 +6,7 @@
  */
 
 import { buildChatCompletionsUrl, buildRequestHeaders, getEmbeddingModel, loadConfig, parseConfigJson } from "./kernel";
+import { scopeKey } from "./scope";
 
 export type MemoryType = "preference" | "fact" | "habit" | "important" | "task";
 export type MemoryPriority = "high" | "medium" | "low";
@@ -158,7 +159,10 @@ function mergePriority(a: MemoryPriority, b: MemoryPriority): MemoryPriority {
 }
 
 class MemoryStore {
-  private dbName = "paw_memory_v2";
+  /** 默认 Bot 用原库（保留既有记忆），其他 Bot 各开一个独立 IndexedDB 库。 */
+  private get dbName(): string {
+    return scopeKey("paw_memory_v2");
+  }
   private storeName = "memories";
   private initialized = false;
 
