@@ -41,6 +41,17 @@ export async function askBot(
   signal?: AbortSignal
 ): Promise<string> {
   const config = normalizeConfig(configForBot(bot));
+  if (config.provider === "claude-local") {
+    const { askClaudeLocal } = await import("./claudeLocal");
+    const context = history
+      .slice(-8)
+      .map((item) => `${item.role === "assistant" ? item.botName || "助手" : "用户"}：${item.content}`)
+      .join("\n\n");
+    return askClaudeLocal(botSystemPrompt(bot, roomName), context ? `${context}\n\n用户：${prompt}` : prompt, {
+      model: config.model,
+      signal,
+    });
+  }
   if (!config.apiKey) {
     throw new Error(`Bot「${bot.name}」没有可用 API Key（全局设置和该 Bot 的模型覆盖都为空）`);
   }

@@ -4,6 +4,7 @@ import { getAllTools, todoStore, calendarStore } from "./tools";
 import { getMultimodalTools } from "./multimodal";
 import { computerControlPrompt, getComputerTools, type ComputerControlMode } from "./computer";
 import { getTimelineTools, TIMELINE_PROMPT, timelineEnabled } from "./timeline";
+import { CLAUDE_LOCAL_PROVIDER } from "./claudeLocal";
 import { getAutomationTools } from "./automations";
 import { personalityStore } from "./personality";
 import { securityManager } from "./security";
@@ -55,6 +56,8 @@ export interface AgentConfig {
   enableMultimodal?: boolean;
   /** 电脑控制：off 关闭 / ask 每次确认 / trusted 信任模式（危险操作仍确认）。 */
   computerControl?: ComputerControlMode;
+  /** 本机 Claude：允许 Claude Code 自带的只读工具（读文件、搜文件、联网搜索 / 抓网页）。 */
+  claudeReadOnlyBuiltins?: boolean;
 }
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
@@ -101,6 +104,18 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     maxTokens: 4096,
     apiKeyPlaceholder: "Anthropic API Key",
     notes: "Uses the Anthropic Messages API (/v1/messages), not OpenAI Chat Completions.",
+  },
+  {
+    id: "claude-local",
+    label: "本机 Claude（Claude Code）",
+    baseUrl: "",
+    model: "",
+    stream: true,
+    enableTools: true,
+    temperature: 0.7,
+    maxTokens: 8192,
+    notes:
+      "使用你电脑上安装的官方 Claude Code 和你自己登录的 Claude 账号，不需要 API Key。桌宠不经手账号凭据；登录过期时在终端运行 claude 并用 /login 重新登录。",
   },
   {
     id: "xfyun-spark",
@@ -352,6 +367,23 @@ export function getEmbeddingModel(config = loadConfig()): string {
 
 export async function testConnection(configOverride?: Partial<AgentConfig>): Promise<string> {
   const config = normalizeConfig({ ...loadConfig(), ...configOverride });
+  if (config.provider === CLAUDE_LOCAL_PROVIDER) {
+    const { askClaudeLocal } = await import("./claudeLocal");
+    const { checkLocalClaude } = await import("./localClaude");
+    const status = await checkLocalClaude();
+    if (!status.available) throw new Error(status.detail || "没有找到 Claude Code");
+    try {
+      const reply = await askClaudeLocal("你是连接测试。", "只回复 OK 两个字母。", { model: config.model });
+      return `${status.version}：${reply.trim().slice(0, 40)}`;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // 终端里不一定有 claude 命令（比如只装了 Claude 桌面版），把找到的完整路径告诉用户
+      if (/登录/.test(message) && status.path) {
+        throw new Error(`${message}\n\n终端里找不到 claude 命令的话，用这个完整路径运行：\n"${status.path.replace(/\//g, "\\")}"`);
+      }
+      throw error;
+    }
+  }
   if (!config.apiKey) throw new Error("请先填写 API Key");
 
   const url = buildChatCompletionsUrl(config);
@@ -723,7 +755,8 @@ export async function streamChat(
   options: { signal?: AbortSignal; onToolEvent?: (event: ToolEvent) => void } = {}
 ): Promise<string> {
   const config = loadConfig();
-  if (!config.apiKey) throw new Error("请先在设置中配置 API Key");
+  const claudeLocal = config.provider === CLAUDE_LOCAL_PROVIDER;
+  if (!config.apiKey && !claudeLocal) throw new Error("请先在设置中配置 API Key");
 
   const userText = request.userMessage;
   if (config.enableSecurity !== false) {
@@ -759,6 +792,33 @@ export async function streamChat(
   ];
 
   const tools = getTools();
+
+  if (claudeLocal) {
+    const { runClaudeLocal, CLAUDE_LOCAL_PROMPT } = await import("./claudeLocal");
+    const { useChatStore } = await import("../store/chat");
+    const conversationKey = `${useBotStore.getState().activeBotId || "default"}:${useChatStore.getState().activeConversationId}`;
+    return runClaudeLocal({
+      conversationKey,
+      systemPrompt: `${systemPrompt}\n\n${CLAUDE_LOCAL_PROMPT}`,
+      history: request.messages,
+      userText,
+      tools,
+      model: config.model,
+      readOnlyBuiltins: config.claudeReadOnlyBuiltins === true,
+      onChunk,
+      onToolEvent: options.onToolEvent,
+      signal: options.signal,
+      executeTool: async (tool, name, args) => {
+        securityManager.log("info", "tool", `Executing tool (claude-local): ${name}`);
+        const executed = await securityManager.safeExecuteTool(name, async () => {
+          if (!tool) throw new Error(`未找到工具 ${name}`);
+          return await tool.execute(args);
+        });
+        return { result: executed.result, ok: executed.success };
+      },
+    });
+  }
+
   const toolDefs = tools.map((tool) => ({
     type: "function" as const,
     function: {
