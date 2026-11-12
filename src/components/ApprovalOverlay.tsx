@@ -2,6 +2,7 @@ import { useBotStore } from "../store/bots";
 import type { ApprovalKind } from "../store/bots";
 import { BotAvatar } from "./BotAvatar";
 import { useThemeClass } from "../store/theme";
+import { addAlwaysAllow } from "../agent/tools";
 
 const KIND_LABEL: Record<ApprovalKind, string> = {
   shell: "系统命令",
@@ -48,22 +49,38 @@ export function ApprovalOverlay({ compact = false }: { compact?: boolean }) {
               <pre className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap text-xs ui-muted">
                 {request.detail}
               </pre>
-              <div className="mt-3 flex gap-2">
+              <div className={`mt-3 grid gap-2 ${request.allowAlways ? "grid-cols-3" : "grid-cols-2"}`}>
                 <button
                   type="button"
                   onClick={() => resolveApproval(request.id, "allowed")}
-                  className="flex-1 rounded-lg bg-yellow-500 px-3 py-2 text-sm font-bold text-gray-900 hover:bg-yellow-400"
+                  className="rounded-lg bg-yellow-500 px-2 py-2 text-sm font-bold text-gray-900 hover:bg-yellow-400"
                 >
-                  允许
+                  允许一次
                 </button>
+                {request.allowAlways && request.scope && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      addAlwaysAllow(request.scope!);
+                      resolveApproval(request.id, "allowed");
+                    }}
+                    title={`以后「${request.scopeLabel || request.scope}」不再询问（高风险操作仍会确认），可在 设置 → AI 能力 → 电脑控制 里撤销`}
+                    className="rounded-lg border border-yellow-500/70 px-2 py-2 text-sm font-semibold text-yellow-300 hover:bg-yellow-500/15"
+                  >
+                    一直允许
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => resolveApproval(request.id, "denied")}
-                  className="flex-1 rounded-lg bg-gray-700 px-3 py-2 text-sm text-gray-200 hover:bg-gray-600"
+                  className="rounded-lg bg-gray-700 px-2 py-2 text-sm text-gray-200 hover:bg-gray-600"
                 >
                   拒绝
                 </button>
               </div>
+              {request.allowAlways && request.scopeLabel && (
+                <p className="mt-1.5 text-[11px] ui-muted">“一直允许”只对「{request.scopeLabel}」生效，高风险操作仍会每次确认。</p>
+              )}
             </div>
           );
         })}

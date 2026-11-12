@@ -162,6 +162,7 @@ export async function runClaudeLocal(options: ClaudeRunOptions): Promise<string>
   let resultText = "";
   let errorText = "";
   let lastAssistantText = "";
+  let toolQueue: Promise<void> = Promise.resolve();
   let sawDelta = false;
   let blockHasText = false;
   const unlisteners: Array<() => void> = [];
@@ -227,25 +228,28 @@ export async function runClaudeLocal(options: ClaudeRunOptions): Promise<string>
       const { callId, name, arguments: args } = event.payload;
       // 两个窗口都在监听：只处理自己这次运行发起的工具调用
       if (event.payload.requestId !== requestId) return;
-      const runId = `${requestId}-${callId}`;
-      options.onToolEvent?.({ type: "start", id: runId, name, args: JSON.stringify(args || {}), at: Date.now() });
-      let result = "";
-      let ok = true;
-      if (options.signal?.aborted) {
-        result = "用户已停止";
-        ok = false;
-      } else {
-        try {
-          const executed = await options.executeTool(toolsByName.get(name), name, args || {});
-          result = executed.result;
-          ok = executed.ok;
-        } catch (error) {
-          result = `工具执行失败：${error}`;
+      // 同时来的几个工具调用排队一个个执行：审批卡片不会叠在一起，“一直允许”的范围也不会串
+      toolQueue = toolQueue.then(async () => {
+        const runId = `${requestId}-${callId}`;
+        options.onToolEvent?.({ type: "start", id: runId, name, args: JSON.stringify(args || {}), at: Date.now() });
+        let result = "";
+        let ok = true;
+        if (options.signal?.aborted) {
+          result = "用户已停止";
           ok = false;
+        } else {
+          try {
+            const executed = await options.executeTool(toolsByName.get(name), name, args || {});
+            result = executed.result;
+            ok = executed.ok;
+          } catch (error) {
+            result = `工具执行失败：${error}`;
+            ok = false;
+          }
         }
-      }
-      options.onToolEvent?.({ type: "finish", id: runId, name, status: ok ? "done" : "error", result, at: Date.now() });
-      await invoke("claude_tool_result", { callId, text: result || "(空)", isError: !ok }).catch(() => {});
+        options.onToolEvent?.({ type: "finish", id: runId, name, status: ok ? "done" : "error", result, at: Date.now() });
+        await invoke("claude_tool_result", { callId, text: result || "(空)", isError: !ok }).catch(() => {});
+      });
     })
   );
 

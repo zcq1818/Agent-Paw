@@ -64,6 +64,11 @@ export interface ApprovalRequest {
   status: ApprovalStatus;
   createdAt: string;
   resolvedAt?: string;
+  /** “一直允许”记住的范围（一般是工具名），以及给用户看的名字 */
+  scope?: string;
+  scopeLabel?: string;
+  /** 高风险操作不提供“一直允许” */
+  allowAlways?: boolean;
 }
 
 const BOTS_KEY = "paw_bots_v1";

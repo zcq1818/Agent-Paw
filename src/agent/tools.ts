@@ -58,20 +58,111 @@ function writeJson(key: string, value: unknown) {
   } catch {}
 }
 
+// ───────────────────────── 一直允许 ─────────────────────────
+
+export const ALWAYS_ALLOW_KEY = "paw_always_allow";
+
+export interface AlwaysAllowEntry {
+  label: string;
+  at: string;
+}
+
+/** 审批卡片上给用户看的操作名（“一直允许 xx”）。没列出的用工具名。 */
+const SCOPE_LABELS: Record<string, string> = {
+  computer_run_command: "执行命令",
+  computer_write_file: "写入文件",
+  computer_click: "点击界面",
+  computer_type: "输入文字",
+  computer_press_keys: "按快捷键",
+  computer_window: "关闭窗口",
+  open_app: "打开应用",
+  open_url: "打开网页",
+  run_shortcut: "运行快捷命令",
+  system_action: "系统动作",
+  open_in_trae: "用 Trae 打开",
+  open_workbuddy: "打开 WorkBuddy",
+  create_automation: "创建自动任务",
+  "kind:shell": "系统命令",
+  "kind:file_edit": "文件改动",
+  "kind:network": "网络访问",
+  "kind:tool": "工具调用",
+};
+
+export function scopeLabel(scope: string) {
+  return SCOPE_LABELS[scope] || scope;
+}
+
+export function loadAlwaysAllow(): Record<string, AlwaysAllowEntry> {
+  return readJson<Record<string, AlwaysAllowEntry>>(ALWAYS_ALLOW_KEY, {});
+}
+
+export function addAlwaysAllow(scope: string) {
+  const all = loadAlwaysAllow();
+  all[scope] = { label: scopeLabel(scope), at: new Date().toISOString() };
+  writeJson(ALWAYS_ALLOW_KEY, all);
+}
+
+export function removeAlwaysAllow(scope: string) {
+  const all = loadAlwaysAllow();
+  delete all[scope];
+  writeJson(ALWAYS_ALLOW_KEY, all);
+}
+
+/**
+ * 正在执行的工具名：工具里调用 confirmSystemAction 时用它作为“一直允许”的范围。
+ * 工具是一个接一个执行的（本机智能体的工具调用也会排队），所以一个变量就够。
+ */
+let activeToolName: string | null = null;
+
+export async function runWithToolScope<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  const previous = activeToolName;
+  activeToolName = name;
+  try {
+    return await fn();
+  } finally {
+    activeToolName = previous;
+  }
+}
+
 /**
  * 外部动作确认：走内联审批卡片，替代原来的 window.confirm 弹窗。
  * 卡片由 ApprovalOverlay 渲染；无人应答时 120 秒后自动拒绝，避免工具调用被永久挂住。
+ *
+ * 卡片有“允许一次 / 一直允许 / 拒绝”。点过“一直允许”的操作以后直接放行；
+ * 高风险操作（allowAlways: false，或提示以 ⚠️ 开头）每次都要确认，也不提供“一直允许”。
  */
-export function confirmSystemAction(message: string, kind: ApprovalKind = "shell"): Promise<boolean> {
+export function confirmSystemAction(
+  message: string,
+  kind: ApprovalKind = "shell",
+  options: { scope?: string; allowAlways?: boolean } = {}
+): Promise<boolean> {
   if (typeof window === "undefined") return Promise.resolve(true);
+
+  const scope = options.scope || activeToolName || `kind:${kind}`;
+  const allowAlways = options.allowAlways !== false && !message.trimStart().startsWith("⚠️");
+  const summary = message.split("\n")[0] || "需要确认外部动作";
+
+  if (allowAlways && loadAlwaysAllow()[scope]) {
+    emitToolEvent({
+      type: "approval",
+      id: `auto_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      status: "done",
+      detail: `已按“一直允许${scopeLabel(scope)}”自动放行：${summary}`,
+      at: Date.now(),
+    });
+    return Promise.resolve(true);
+  }
 
   const store = useBotStore.getState();
   const id = store.requestApproval({
     botId: store.activeBotId || "bot_default_paw",
     threadId: store.activeThreadId || "",
     kind,
-    summary: message.split("\n")[0] || "需要确认外部动作",
+    summary,
     detail: message,
+    scope,
+    scopeLabel: scopeLabel(scope),
+    allowAlways,
   });
   emitToolEvent({
     type: "approval",

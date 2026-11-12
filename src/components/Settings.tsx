@@ -59,7 +59,7 @@ import { THEME_OPTIONS, type AppTheme, useThemeClass, useThemeStore } from "../s
 import { useActivityStore } from "../store/activity";
 import { DEFAULT_CHAT_HOTKEY, normalizeHotkey, useShortcutStore } from "../store/shortcut";
 import { CustomSkillsSettings } from "./CustomSkillsSettings";
-import { InitiativeCard, TimelineOptions } from "./AssistantSettings";
+import { AlwaysAllowList, InitiativeCard, TimelineOptions } from "./AssistantSettings";
 import { useAvatarOptions } from "../store/petAvatars";
 import type { ComputerControlMode } from "../agent/computer";
 import { CLAUDE_MODEL_OPTIONS, CODEBUDDY_MODEL_OPTIONS, LOCAL_AGENT_LABELS, localAgentOf } from "../agent/claudeLocal";
@@ -717,6 +717,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
                 {computerControl === "trusted" && (
                   <Notice tone="warning">信任模式下桌宠会自己点击和输入，操作过程中尽量别同时动鼠标键盘。</Notice>
                 )}
+                <AlwaysAllowList />
               </Card>
 
               <Card

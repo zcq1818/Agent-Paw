@@ -622,11 +622,16 @@ export function Pet() {
 
   const sendMiniMessage = useCallback(async () => {
     const text = miniInput.trim();
-    if (!text || isStreaming) return;
+    if (!text) return;
     markHumanTouch();
     pauseMotion(2500);
     setMiniInput("");
     recordTyping(text.length, "mini_chat");
+    if (isStreaming) {
+      // 运行中插话：不打断，模型下一步就能看到
+      useAgentStore.getState().interject(text);
+      return;
+    }
     addMessage({ role: "user", content: text });
     setPetState("thinking");
     setEmotion("thinking");
@@ -1082,11 +1087,11 @@ export function Pet() {
               onKeyDown={(event) => {
                 if (event.key === "Enter") sendMiniMessage();
               }}
-              placeholder={`问问${petName}…`}
+              placeholder={isStreaming ? "可以继续补充，Enter 发送" : `问问${petName}…`}
             />
             <button
               className="rounded-xl bg-primary px-3 py-2 text-sm font-bold text-primary-fg disabled:opacity-50"
-              disabled={!miniInput.trim() || isStreaming}
+              disabled={!miniInput.trim()}
               onClick={sendMiniMessage}
             >
               发送
