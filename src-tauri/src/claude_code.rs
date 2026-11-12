@@ -201,6 +201,78 @@ pub struct ClaudeRunRequest {
     read_only_builtins: bool,
     tools: Vec<Value>,
     path: Option<String>,
+    /// claude（默认）或 codebuddy：两者的非交互模式参数基本一致
+    agent: Option<String>,
+}
+
+fn is_codebuddy(agent: &Option<String>) -> bool {
+    agent.as_deref() == Some("codebuddy")
+}
+
+/// 找官方 npm 包装出来的 codebuddy 命令（codebuddy.cmd），或用户指定的路径。
+pub(crate) fn codebuddy_binary(explicit: Option<String>) -> Option<PathBuf> {
+    if let Some(path) = explicit.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()) {
+        return Some(PathBuf::from(path));
+    }
+    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        dirs.push(PathBuf::from(appdata).join("npm"));
+    }
+    dirs.push(PathBuf::from(r"C:\Program Files\nodejs"));
+    for dir in dirs {
+        for name in ["codebuddy.cmd", "codebuddy.exe"] {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+#[derive(serde::Serialize)]
+pub struct LocalAgentStatus {
+    available: bool,
+    version: String,
+    path: String,
+    detail: String,
+}
+
+#[tauri::command]
+pub async fn check_codebuddy(path: Option<String>) -> Result<LocalAgentStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(binary) = codebuddy_binary(path) else {
+            return LocalAgentStatus {
+                available: false,
+                version: String::new(),
+                path: String::new(),
+                detail: "没有找到 CodeBuddy Code。用 npm install -g @tencent-ai/codebuddy-code 安装官方版本。".into(),
+            };
+        };
+        let output = crate::hidden_command(&binary.to_string_lossy()).arg("--version").output();
+        match output {
+            Ok(out) if out.status.success() => LocalAgentStatus {
+                available: true,
+                version: format!("CodeBuddy Code {}", String::from_utf8_lossy(&out.stdout).trim()),
+                path: binary.to_string_lossy().to_string(),
+                detail: "已找到官方 CodeBuddy Code（使用你自己登录的账号）".into(),
+            },
+            Ok(out) => LocalAgentStatus {
+                available: false,
+                version: String::new(),
+                path: binary.to_string_lossy().to_string(),
+                detail: String::from_utf8_lossy(&out.stderr).chars().take(300).collect(),
+            },
+            Err(e) => LocalAgentStatus {
+                available: false,
+                version: String::new(),
+                path: binary.to_string_lossy().to_string(),
+                detail: format!("无法运行 CodeBuddy Code：{e}"),
+            },
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 fn work_dir(app: &AppHandle) -> PathBuf {
@@ -236,7 +308,14 @@ pub fn claude_run(app: AppHandle, request: ClaudeRunRequest) -> Result<(), Strin
     });
     std::fs::write(&mcp_file, mcp_config.to_string()).map_err(|e| e.to_string())?;
 
-    let binary = crate::claude_binary(request.path.clone());
+    let codebuddy = is_codebuddy(&request.agent);
+    let binary = if codebuddy {
+        codebuddy_binary(request.path.clone())
+            .map(|p| p.to_string_lossy().to_string())
+            .ok_or("没有找到 CodeBuddy Code，请先安装官方版本：npm install -g @tencent-ai/codebuddy-code")?
+    } else {
+        crate::claude_binary(request.path.clone())
+    };
     let mut cmd = crate::hidden_command(&binary);
     cmd.current_dir(&dir).args([
         "-p",
@@ -247,7 +326,10 @@ pub fn claude_run(app: AppHandle, request: ClaudeRunRequest) -> Result<(), Strin
         "--system-prompt-file",
     ]);
     cmd.arg(&system_file);
-    cmd.arg("--system-prompt-snapshot").arg("off");
+    if !codebuddy {
+        // Claude Code 默认复用第一轮的系统提示词；记忆等内容每轮会变，要求每次重建
+        cmd.arg("--system-prompt-snapshot").arg("off");
+    }
     cmd.arg("--mcp-config").arg(&mcp_file).arg("--strict-mcp-config");
     let builtins = if request.read_only_builtins { "Read,Glob,Grep,WebSearch,WebFetch" } else { "" };
     cmd.arg("--tools").arg(builtins);
@@ -256,6 +338,22 @@ pub fn claude_run(app: AppHandle, request: ClaudeRunRequest) -> Result<(), Strin
         allowed.push_str(",Read,Glob,Grep,WebSearch,WebFetch");
     }
     cmd.arg("--allowedTools").arg(allowed);
+    if codebuddy {
+        // CodeBuddy 上报的工具列表不随 --tools 变化，再显式禁用会改动电脑或对外发消息的工具；
+        // 命令和文件操作只能走桌宠自己的电脑控制工具（带审批）。不传 -y，官方说明此模式下
+        // 写文件、跑命令、联网默认会被拦下。
+        let mut denied = vec![
+            "Bash", "PowerShell", "Write", "Edit", "NotebookEdit", "ComputerUse", "REPL", "Agent", "Workflow",
+            "CronCreate", "CronDelete", "WeChatReply", "WeComReply", "PushNotification", "SendMessage",
+            "MessageColleague", "SpeakInChannel", "CreateColleague", "CreateChannel", "ManageChannel",
+            "DeleteColleague", "ManageColleague", "A2ASendMessage", "TeamCreate", "TeamDelete", "SkillManage",
+            "EnterWorktree", "LibraryUpload", "ImageGen", "ImageEdit", "VideoGen",
+        ];
+        if !request.read_only_builtins {
+            denied.extend(["Read", "Glob", "Grep", "WebSearch", "WebFetch", "LSP"]);
+        }
+        cmd.arg("--disallowedTools").arg(denied.join(","));
+    }
     cmd.arg("--max-turns").arg("40");
     if let Some(model) = request.model.as_deref().map(str::trim).filter(|m| !m.is_empty() && *m != "default") {
         cmd.arg("--model").arg(model);

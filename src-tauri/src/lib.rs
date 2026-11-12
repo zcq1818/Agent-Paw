@@ -3,6 +3,7 @@ use std::process::Command;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use serde::Serialize;
 
+mod ai_apps;
 mod claude_code;
 mod control;
 mod timeline;
@@ -430,7 +431,11 @@ pub fn run() {
             timeline::timeline_clear,
             claude_code::claude_run,
             claude_code::claude_cancel,
-            claude_code::claude_tool_result
+            claude_code::claude_tool_result,
+            claude_code::check_codebuddy,
+            ai_apps::ai_apps,
+            ai_apps::open_in_trae,
+            ai_apps::open_workbuddy
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

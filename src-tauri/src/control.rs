@@ -30,6 +30,11 @@ fn clip(text: String, max: usize) -> String {
 }
 
 /// 展开 ~ 和 %VAR% / $env:VAR，方便模型直接写 “~/Desktop”。
+/// 展开 ~ 和 %VAR% 后的路径字符串（给其它模块用）。
+pub(crate) fn expand_user_path(input: &str) -> String {
+    expand_path(input).to_string_lossy().to_string()
+}
+
 fn expand_path(input: &str) -> PathBuf {
     let mut text = input.trim().trim_matches('"').to_string();
     if text == "~" || text.starts_with("~/") || text.starts_with("~\\") {

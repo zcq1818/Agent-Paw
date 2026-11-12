@@ -41,14 +41,15 @@ export async function askBot(
   signal?: AbortSignal
 ): Promise<string> {
   const config = normalizeConfig(configForBot(bot));
-  if (config.provider === "claude-local") {
-    const { askClaudeLocal } = await import("./claudeLocal");
+  if (config.provider === "claude-local" || config.provider === "codebuddy-local") {
+    const { askClaudeLocal, localAgentOf } = await import("./claudeLocal");
     const context = history
       .slice(-8)
       .map((item) => `${item.role === "assistant" ? item.botName || "助手" : "用户"}：${item.content}`)
       .join("\n\n");
     return askClaudeLocal(botSystemPrompt(bot, roomName), context ? `${context}\n\n用户：${prompt}` : prompt, {
       model: config.model,
+      agent: localAgentOf(config.provider) || "claude",
       signal,
     });
   }
