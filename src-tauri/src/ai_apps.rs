@@ -64,6 +64,25 @@ fn trae_launcher(location: &str, icon: &str) -> Option<PathBuf> {
     None
 }
 
+/// 启动其它软件时脱离桌宠的进程树：桌宠重启 / 退出时不会把 Trae、WorkBuddy 一起带走。
+/// 所在的作业对象不允许脱离时，退回普通启动。
+fn spawn_detached(mut cmd: std::process::Command, hidden: bool) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        let base = if hidden { CREATE_NO_WINDOW } else { 0 } | CREATE_NEW_PROCESS_GROUP;
+        cmd.creation_flags(base | CREATE_BREAKAWAY_FROM_JOB);
+        if cmd.spawn().is_ok() {
+            return Ok(());
+        }
+        cmd.creation_flags(base);
+    }
+    cmd.spawn().map(|_| ())
+}
+
 fn list_apps() -> Vec<AiApp> {
     let mut apps = Vec::new();
     for (name, location, icon) in installed() {
@@ -104,7 +123,7 @@ pub async fn open_in_trae(path: String, line: Option<u32>, name: Option<String>)
         }
         .cloned()
         .ok_or("没有找到已安装的 Trae")?;
-        let mut cmd = crate::hidden_command(&app.launcher);
+        let mut cmd = std::process::Command::new(&app.launcher);
         cmd.arg("-r");
         match line {
             Some(line) if Path::new(&target).is_file() => {
@@ -114,7 +133,7 @@ pub async fn open_in_trae(path: String, line: Option<u32>, name: Option<String>)
                 cmd.arg(&target);
             }
         }
-        cmd.spawn().map_err(|e| format!("启动 {} 失败：{e}", app.name))?;
+        spawn_detached(cmd, true).map_err(|e| format!("启动 {} 失败：{e}", app.name))?;
         Ok(format!("已用 {} 打开 {target}", app.name))
     })
     .await
@@ -125,8 +144,7 @@ pub async fn open_in_trae(path: String, line: Option<u32>, name: Option<String>)
 pub async fn open_workbuddy() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let app = list_apps().into_iter().find(|a| a.kind == "workbuddy").ok_or("没有找到已安装的 WorkBuddy")?;
-        std::process::Command::new(&app.launcher)
-            .spawn()
+        spawn_detached(std::process::Command::new(&app.launcher), false)
             .map_err(|e| format!("启动 WorkBuddy 失败：{e}"))?;
         Ok(format!("已打开 {}", app.name))
     })

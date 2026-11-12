@@ -576,6 +576,7 @@ export function Pet() {
     runPrompt,
     speak,
     isBusy: () => useAgentStore.getState().isStreaming,
+    report: (markdown) => addMessage({ role: "assistant", content: markdown }),
   });
 
   useInitiative({

@@ -10,6 +10,7 @@ import {
 } from "../agent/timeline";
 import { AUTOMATIONS_KEY, describeAutomation, useAutomationStore } from "../agent/automations";
 import { loadInitiativeMode, saveInitiativeMode, type InitiativeMode } from "../agent/initiative";
+import { allFlows, runFlow, type FlowResult, type UiFlow } from "../agent/uiFlow";
 
 const RETENTION_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "7", label: "7 天" },
@@ -91,6 +92,86 @@ const INITIATIVE_OPTIONS: Array<{ value: InitiativeMode; label: string }> = [
   { value: "suggest", label: "主动提议" },
 ];
 
+/** 软件签到：内置 / 教过的流程，可以马上跑一次，或设成每天自动。 */
+function AppFlowsSection() {
+  const items = useAutomationStore((state) => state.items);
+  const add = useAutomationStore((state) => state.add);
+  const [flows] = useState(allFlows);
+  const [running, setRunning] = useState<string | null>(null);
+  const [results, setResults] = useState<Record<string, FlowResult>>({});
+  const [times, setTimes] = useState<Record<string, string>>({});
+
+  const run = async (flow: UiFlow) => {
+    setRunning(flow.id);
+    try {
+      const result = await runFlow(flow);
+      setResults((current) => ({ ...current, [flow.id]: result }));
+    } finally {
+      setRunning(null);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="text-sm font-medium text-fg">软件签到</div>
+      <p className="text-xs leading-relaxed text-fg-muted">
+        桌宠按固定步骤去点按钮，不用大模型：能读到界面结构就直接按按钮名字点，读不到就截图认字再点。别的软件对桌宠说“教你 XX 的签到：先点…再点…”就能学会。
+      </p>
+      <ul className="divide-y divide-line rounded-lg border border-line">
+        {flows.map((flow) => {
+          const scheduled = items.find((item) => item.action.type === "flow" && item.action.flowId === flow.id);
+          const result = results[flow.id];
+          return (
+            <li key={flow.id} className="space-y-1.5 px-3 py-2">
+              <div className="flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm text-fg">{flow.name}</div>
+                  <div className="truncate text-xs text-fg-muted">
+                    {scheduled ? `已设为${describeAutomation(scheduled).split("：")[0]} 自动执行` : flow.description}
+                  </div>
+                </div>
+                <Button size="sm" variant="secondary" disabled={running !== null} onClick={() => run(flow)}>
+                  {running === flow.id ? "执行中…" : "立即执行"}
+                </Button>
+                {!scheduled && (
+                  <>
+                    <input
+                      type="time"
+                      className="input h-8 w-[92px] px-2 text-xs"
+                      value={times[flow.id] || "09:30"}
+                      onChange={(event) => setTimes((current) => ({ ...current, [flow.id]: event.target.value }))}
+                    />
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={() =>
+                        add({
+                          name: flow.name,
+                          time: times[flow.id] || "09:30",
+                          days: [],
+                          action: { type: "flow", flowId: flow.id, label: flow.name },
+                          source: "user",
+                        })
+                      }
+                    >
+                      每天自动
+                    </Button>
+                  </>
+                )}
+              </div>
+              {result && (
+                <div className={`text-xs ${result.ok ? "text-success" : "text-danger"}`}>
+                  {result.ok ? "✓" : "✕"} {result.summary}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 /** 主动助手：主动提议开关 + 自动任务列表。 */
 export function InitiativeCard({ activityEnabled }: { activityEnabled: boolean }) {
   const [mode, setMode] = useState<InitiativeMode>(loadInitiativeMode);
@@ -131,6 +212,8 @@ export function InitiativeCard({ activityEnabled }: { activityEnabled: boolean }
       {!activityEnabled && mode !== "off" && (
         <Notice tone="warning">需要先打开上面的「本地活动观察」，主动提议才有依据。</Notice>
       )}
+
+      <AppFlowsSection />
 
       <div className="space-y-2">
         <div className="text-sm font-medium text-fg">自动任务</div>

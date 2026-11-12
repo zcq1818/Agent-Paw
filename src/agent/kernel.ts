@@ -8,6 +8,7 @@ import { CLAUDE_LOCAL_PROVIDER, CODEBUDDY_LOCAL_PROVIDER, localAgentOf } from ".
 import { invoke } from "@tauri-apps/api/core";
 import { getAutomationTools } from "./automations";
 import { getHandoffTools } from "./handoff";
+import { getFlowTools } from "./uiFlow";
 import { personalityStore } from "./personality";
 import { securityManager } from "./security";
 import { getSkillsContext } from "./customSkills";
@@ -483,6 +484,8 @@ Agent 行为准则：
   prompt += computerControlPrompt(config.computerControl === "off" || config.computerControl === "trusted" ? config.computerControl : "ask");
   if (timelineEnabled()) prompt += `\n\n${TIMELINE_PROMPT}`;
   prompt += "\n\n## 自动任务\n用户要求“每天 / 每周 / 工作日 几点帮我做某事”时，用 create_automation 建定时任务，不要只口头答应。";
+  prompt +=
+    "\n\n## 软件签到\n用户让你去某个软件签到、领积分时，先用 list_app_flows 看有没有现成流程，有就 run_app_flow；要每天自动做，用 create_automation 并填 flow。没有现成流程时，问清楚界面上要依次点哪些文字，再用 create_app_flow 学会它。";
 
   prompt += `
 
@@ -699,7 +702,7 @@ const baseTools: Tool[] = [
 
 export function getTools(): Tool[] {
   const config = loadConfig();
-  const tools: Tool[] = [...baseTools, ...getAllTools(), ...getHandoffTools()];
+  const tools: Tool[] = [...baseTools, ...getAllTools(), ...getHandoffTools(), ...getFlowTools()];
   if (config.enableMultimodal !== false) {
     tools.push(...getMultimodalTools());
   }

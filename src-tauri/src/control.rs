@@ -434,6 +434,26 @@ mod win {
     }
 }
 
+/// 按 id 找窗口（为空用最上层的可见窗口），返回句柄和 (id, 标题)。给看图找字用。
+#[cfg(windows)]
+pub(crate) fn resolve_window(id: Option<i64>) -> Result<(windows_sys::Win32::Foundation::HWND, (i64, String)), String> {
+    let info = match id {
+        Some(id) if id != 0 => win::info(win::hwnd(id)).ok_or("窗口不存在或不可见，请重新列出窗口")?,
+        _ => win::list().into_iter().find(|w| !w.minimized).ok_or("没有找到可读取的窗口")?,
+    };
+    if info.minimized {
+        win::action(win::hwnd(info.id), "restore")?;
+        std::thread::sleep(std::time::Duration::from_millis(400));
+    }
+    Ok((win::hwnd(info.id), (info.id, info.title.clone())))
+}
+
+/// 把窗口切到最前面（看图找字截图前用）。
+#[cfg(windows)]
+pub(crate) fn bring_to_front(h: windows_sys::Win32::Foundation::HWND) -> bool {
+    win::focus(h)
+}
+
 /// 是否处于锁屏 / 安全桌面（给时间线记录器用）。
 #[cfg(windows)]
 pub(crate) fn desktop_locked() -> bool {

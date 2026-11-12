@@ -295,6 +295,20 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
 
   recordWindow: (info) => {
     if (!info.title && !info.processName) return;
+    // 锁屏界面不是在用软件：结束当前计时，不把锁屏时间算成 LockApp 的使用时长
+    if (/^(lockapp|logonui)\.exe$/i.test(info.processName)) {
+      const current = get().current;
+      if (!current) return;
+      const closed = {
+        ...current,
+        endedAt: new Date().toISOString(),
+        durationMs: Date.now() - new Date(current.startedAt).getTime(),
+      };
+      const entries = [...get().entries, closed].slice(-MAX_ENTRIES);
+      saveEntries(entries);
+      set({ entries, current: undefined });
+      return;
+    }
     const state = get();
     const current = state.current;
     const same = current && current.title === info.title && current.processName === info.processName;
