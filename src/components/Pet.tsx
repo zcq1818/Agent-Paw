@@ -179,8 +179,6 @@ export function Pet() {
   const [facing, setFacing] = useState<Facing>("right");
   const [showMenu, setShowMenu] = useState(false);
   const [showMiniChat, setShowMiniChat] = useState(false);
-  const [showVitals, setShowVitals] = useState(false);
-  const vitalsTimerRef = useRef<number | null>(null);
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [bubbleMessage, setBubbleMessage] = useState<string | null>(null);
@@ -243,15 +241,6 @@ export function Pet() {
 
   const pauseMotion = useCallback((ms = 1800) => {
     pauseMotionUntilRef.current = Math.max(pauseMotionUntilRef.current, Date.now() + ms);
-  }, []);
-
-  const showVitalsBriefly = useCallback((duration = 3000) => {
-    setShowVitals(true);
-    if (vitalsTimerRef.current) window.clearTimeout(vitalsTimerRef.current);
-    vitalsTimerRef.current = window.setTimeout(() => {
-      setShowVitals(false);
-      vitalsTimerRef.current = null;
-    }, duration);
   }, []);
 
   const markHumanTouch = useCallback(() => {
@@ -530,7 +519,6 @@ export function Pet() {
   const openMiniChat = useCallback(() => {
     markHumanTouch();
     pauseMotion(2200);
-    setShowVitals(false);
     setShowMiniChat(true);
     setShowMenu(false);
     setBubbleMessage(null);
@@ -801,7 +789,6 @@ export function Pet() {
     event.preventDefault();
     markHumanTouch();
     pauseMotion(1600);
-    showVitalsBriefly();
     setMenuPos({ x: event.clientX, y: event.clientY });
     setShowMenu((value) => !value);
   }, [markHumanTouch, pauseMotion]);
@@ -885,7 +872,6 @@ export function Pet() {
     if (isDragging || dragRef.current?.moved) return;
     markHumanTouch();
     pauseMotion(2200);
-    showVitalsBriefly();
     setShowMenu(false);
     const interaction = Math.random() < 0.45 ? getInteractionByType("tip") : getInteractionByType("joke");
     adjustLife({ affection: 3, energy: -0.5, curiosity: -1 });
@@ -952,7 +938,6 @@ export function Pet() {
 
   const handlePetPointerEnter = useCallback(() => {
     hoverPetRef.current = true;
-    showVitalsBriefly(4000);
     pauseMotion(3200);
   }, [pauseMotion]);
 
@@ -964,8 +949,6 @@ export function Pet() {
   const menuLeft = Math.max(8, Math.min(menuPos.x, (showMiniChat ? CHAT_SIZE.width : PET_SIZE.width) - 164));
   const menuTop = Math.max(8, Math.min(menuPos.y, (showMiniChat ? CHAT_SIZE.height : PET_SIZE.height) - 286));
   const recentMessages = messages.slice(-8);
-  const lifeMood =
-    life.energy < 25 ? "想休息" : life.affection > 75 ? "很亲近" : life.curiosity > 80 ? "想探索" : "陪伴中";
 
   return (
     <div className={`pet-window ${themeClass} relative h-screen w-screen select-none overflow-hidden`} onContextMenu={handleContextMenu}>
@@ -1045,15 +1028,6 @@ export function Pet() {
             ))}
           </div>
         </button>
-      )}
-
-      {!showMiniChat && showVitals && (
-        <div className="absolute bottom-3 left-3 z-20 w-32 rounded-xl border border-line bg-surface/90 p-2 text-[11px] text-fg shadow-lg backdrop-blur pointer-events-none transition-opacity duration-200">
-          <div className="mb-1 font-semibold">{lifeMood}</div>
-          <LifeBar label="精力" value={life.energy} color="bg-emerald-400" />
-          <LifeBar label="亲密" value={life.affection} color="bg-pink-400" />
-          <LifeBar label="好奇" value={life.curiosity} color="bg-sky-400" />
-        </div>
       )}
 
       {showMiniChat && (
@@ -1180,19 +1154,6 @@ export function Pet() {
   );
 }
 
-function LifeBar({ label, value, color }: { label: string; value: number; color: string }) {
-  return (
-    <div className="mb-1 last:mb-0">
-      <div className="mb-0.5 flex justify-between">
-        <span>{label}</span>
-        <span>{Math.round(value)}</span>
-      </div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-line">
-        <div className={`h-full ${color}`} style={{ width: `${Math.max(4, Math.min(100, value))}%` }} />
-      </div>
-    </div>
-  );
-}
 
 function MenuItem({ label, onClick }: { label: string; onClick: () => void }) {
   return (
