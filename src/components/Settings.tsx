@@ -165,7 +165,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
   const [baseUrl, setBaseUrl] = useState(initialModel.baseUrl || "");
   const [model, setModel] = useState(initialModel.model || "");
   const [stream, setStream] = useState(initialModel.stream ?? false);
-  const [enableTools, setEnableTools] = useState(initialModel.enableTools ?? false);
+  const [enableTools, setEnableTools] = useState(initialModel.enableTools ?? true);
   const [temperature, setTemperature] = useState(initialModel.temperature ?? 0.7);
   const [maxTokens, setMaxTokens] = useState(initialModel.maxTokens ?? 4096);
   const [embeddingModel, setEmbeddingModel] = useState(initialModel.embeddingModel || "text-embedding-3-small");
@@ -250,7 +250,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
     setBaseUrl(settings.baseUrl || "");
     setModel(settings.model || "");
     setStream(settings.stream ?? false);
-    setEnableTools(settings.enableTools ?? false);
+    setEnableTools(settings.enableTools ?? true);
     setTemperature(settings.temperature ?? 0.7);
     setMaxTokens(settings.maxTokens ?? 4096);
     setEmbeddingModel(settings.embeddingModel || "text-embedding-3-small");

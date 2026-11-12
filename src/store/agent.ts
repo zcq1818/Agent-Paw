@@ -348,7 +348,9 @@ export const useAgentStore = create<AgentState>((set) => ({
         maybePushTodayNews(addMessage, "ok").catch(() => {});
       }
     } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === "AbortError") {
+      // Tauri HTTP 插件取消请求时抛出的是字符串 "Request cancelled"，不是 AbortError，
+      // 所以以 signal 状态为准判断是不是用户点了停止。
+      if (controller.signal.aborted || (err instanceof DOMException && err.name === "AbortError")) {
         const partial = useAgentStore.getState().streamText.trim();
         if (partial) addMessage({ role: "assistant", content: `${partial}\n\n[已停止]`, toolRuns });
         set({ streamText: "", error: null, currentToolRuns: [] });

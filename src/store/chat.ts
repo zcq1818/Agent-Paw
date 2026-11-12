@@ -236,12 +236,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   removeLastAssistant: () => {
     set((state) =>
       withActiveConversation(state, (conversation) => {
-        const reverseIndex = [...conversation.messages].reverse().findIndex((message) => message.role === "assistant");
-        if (reverseIndex < 0) return conversation;
-        const removeIndex = conversation.messages.length - 1 - reverseIndex;
+        // 删掉末尾连续的所有助手消息：一轮回复后面可能还跟着自动推送（如今日新闻），
+        // 只删最后一条会让“重新生成”留下旧回复。
+        let keep = conversation.messages.length;
+        while (keep > 0 && conversation.messages[keep - 1].role === "assistant") keep -= 1;
+        if (keep === conversation.messages.length) return conversation;
         return {
           ...conversation,
-          messages: conversation.messages.filter((_, index) => index !== removeIndex),
+          messages: conversation.messages.slice(0, keep),
           updatedAt: nowIso(),
         };
       })
