@@ -36,7 +36,8 @@ export async function callLocalClaude(
     return await invoke<string>("run_local_claude", {
       prompt,
       path: path?.trim() || null,
-      allow_tools: allowedTools,
+      // Tauri v2 把 Rust 的 snake_case 参数映射为 camelCase；写成 allow_tools 会被静默忽略。
+      allowTools: allowedTools,
     });
   } catch (error) {
     const detail = String(error);

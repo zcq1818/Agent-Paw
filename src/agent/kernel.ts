@@ -6,6 +6,7 @@ import { personalityStore } from "./personality";
 import { securityManager } from "./security";
 import { getSkillsContext } from "./customSkills";
 import type { ToolEvent } from "./toolEvents";
+import { BROWSER_USER_AGENT, fetchExternal } from "./http";
 import { getActiveBot, useBotStore, type BotModelOverride } from "../store/bots";
 
 export type ProviderId = "agnes" | "openai" | "deepseek" | "openrouter" | "custom" | string;
@@ -316,6 +317,49 @@ export interface Tool {
   execute: (args: Record<string, unknown>) => Promise<string>;
 }
 
+type SearchItem = { title: string; link?: string; snippet?: string };
+
+function htmlToText(input: string): string {
+  const doc = new DOMParser().parseFromString(input, "text/html");
+  return (doc.body.textContent || "").replace(/\s+/g, " ").trim();
+}
+
+/** 先用 Bing 的 RSS 搜索（结构化、稳定），失败再退回 DuckDuckGo HTML 版。 */
+async function searchWeb(query: string): Promise<{ items: SearchItem[]; error?: string }> {
+  const headers = { "User-Agent": BROWSER_USER_AGENT, "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8" };
+  let lastError = "";
+
+  try {
+    const resp = await fetchExternal(`https://www.bing.com/search?q=${encodeURIComponent(query)}&format=rss`, { headers });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const doc = new DOMParser().parseFromString(await resp.text(), "text/xml");
+    const items = Array.from(doc.querySelectorAll("item"))
+      .slice(0, 5)
+      .map((item) => ({
+        title: htmlToText(item.querySelector("title")?.textContent || ""),
+        link: item.querySelector("link")?.textContent?.trim() || undefined,
+        snippet: htmlToText(item.querySelector("description")?.textContent || "").slice(0, 160) || undefined,
+      }))
+      .filter((item) => item.title);
+    if (items.length) return { items };
+  } catch (error) {
+    lastError = String(error);
+  }
+
+  try {
+    const resp = await fetchExternal(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, { headers });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const doc = new DOMParser().parseFromString(await resp.text(), "text/html");
+    const items = Array.from(doc.querySelectorAll("a.result__a"))
+      .slice(0, 5)
+      .map((node) => ({ title: (node.textContent || "").trim(), link: node.getAttribute("href") || undefined }))
+      .filter((item) => item.title);
+    return { items };
+  } catch (error) {
+    return { items: [], error: lastError || String(error) };
+  }
+}
+
 const baseTools: Tool[] = [
   {
     name: "web_search",
@@ -328,25 +372,15 @@ const baseTools: Tool[] = [
       required: ["query"],
     },
     execute: async (args) => {
-      const query = args.query as string;
-      try {
-        const resp = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
-          headers: { "User-Agent": "Paw/1.0" },
-        });
-        const html = await resp.text();
-        const results: string[] = [];
-        const matches = html.matchAll(/<a[^>]*class="result__a"[^>]*>(.*?)<\/a>/gs);
-        for (const match of matches) {
-          const text = match[1].replace(/<[^>]+>/g, "").trim();
-          if (text) results.push(text);
-          if (results.length >= 5) break;
-        }
-        return results.length
-          ? `搜索结果:\n${results.map((item, index) => `${index + 1}. ${item}`).join("\n")}`
-          : "没有找到相关结果";
-      } catch (e) {
-        return `搜索失败: ${e}`;
-      }
+      const query = String(args.query || "").trim();
+      if (!query) return "请提供搜索关键词";
+      const results = await searchWeb(query);
+      if (results.error) return `搜索失败: ${results.error}`;
+      return results.items.length
+        ? `搜索结果:\n${results.items
+            .map((item, index) => `${index + 1}. ${item.title}${item.link ? ` (${item.link})` : ""}${item.snippet ? `\n   ${item.snippet}` : ""}`)
+            .join("\n")}`
+        : "没有找到相关结果";
     },
   },
   {
@@ -464,8 +498,11 @@ const baseTools: Tool[] = [
       },
     },
     execute: async (args) => {
-      const events = calendarStore.getUpcoming((args.days as number) || 7);
-      if (events.length === 0) return "接下来暂无日程";
+      // days 是时间范围而不是条数；之前直接当 limit 传，导致“未来 7 天”只返回 7 条。
+      const days = Math.max(1, Number(args.days) || 7);
+      const horizon = Date.now() + days * 24 * 60 * 60 * 1000;
+      const events = calendarStore.getUpcoming(200).filter((event) => new Date(event.startTime).getTime() <= horizon);
+      if (events.length === 0) return `接下来 ${days} 天暂无日程`;
       return `即将到来的日程:\n${events
         .map((event) => {
           const start = new Date(event.startTime);
@@ -592,9 +629,11 @@ export async function streamChat(
 
   const url = buildChatCompletionsUrl(config);
   const shouldStream = config.stream !== false;
-  const shouldSendTools = config.enableTools !== false;
+  // 接口拒绝 tools 字段后置为 false，后续轮次不再重复“带 tools 失败 → 重试”。
+  let shouldSendTools = config.enableTools !== false;
   let fullText = "";
   let maxRounds = 5;
+  let ranOutOfRounds = true;
 
   while (maxRounds > 0) {
     maxRounds -= 1;
@@ -634,6 +673,7 @@ export async function streamChat(
           error: errBody.slice(0, 220),
         });
         delete requestBody.tools;
+        shouldSendTools = false;
         resp = await fetch(url, {
           method: "POST",
           headers: buildRequestHeaders(config),
@@ -670,7 +710,10 @@ export async function streamChat(
       fullText += content;
       if (content) onChunk(content);
 
-      if (!shouldSendTools || nonStreamToolCalls.length === 0) break;
+      if (!shouldSendTools || nonStreamToolCalls.length === 0) {
+        ranOutOfRounds = false;
+        break;
+      }
 
       currentMessages.push({
         role: "assistant",
@@ -691,9 +734,42 @@ export async function streamChat(
     const decoder = new TextDecoder();
     let buffer = "";
     let roundText = "";
-    const toolCalls: RuntimeToolCall[] = [];
+    const rawToolCalls: RuntimeToolCall[] = [];
+    let streamDone = false;
 
-    while (true) {
+    const handleLine = (line: string) => {
+      const trimmed = line.trim();
+      // SSE 规范里 "data:" 后的空格可有可无，部分网关不带空格。
+      if (!trimmed.startsWith("data:")) return;
+      const data = trimmed.slice(5).trim();
+      if (data === "[DONE]") {
+        streamDone = true;
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(data);
+        const delta = parsed.choices?.[0]?.delta;
+        if (!delta) return;
+
+        if (delta.content) {
+          roundText += delta.content;
+          onChunk(delta.content);
+        }
+
+        if (delta.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index ?? 0;
+            if (!rawToolCalls[idx]) rawToolCalls[idx] = { id: tc.id || "", name: "", arguments: "" };
+            if (tc.id) rawToolCalls[idx].id = tc.id;
+            if (tc.function?.name) rawToolCalls[idx].name = tc.function.name;
+            if (tc.function?.arguments) rawToolCalls[idx].arguments += tc.function.arguments;
+          }
+        }
+      } catch {}
+    };
+
+    while (!streamDone) {
       if (options.signal?.aborted) throw new DOMException("生成已停止", "AbortError");
       const { done, value } = await reader.read();
       if (done) break;
@@ -701,38 +777,30 @@ export async function streamChat(
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
-
       for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith("data: ")) continue;
-        const data = trimmed.slice(6);
-        if (data === "[DONE]") break;
-
-        try {
-          const parsed = JSON.parse(data);
-          const delta = parsed.choices?.[0]?.delta;
-          if (!delta) continue;
-
-          if (delta.content) {
-            roundText += delta.content;
-            onChunk(delta.content);
-          }
-
-          if (delta.tool_calls) {
-            for (const tc of delta.tool_calls) {
-              const idx = tc.index ?? 0;
-              if (!toolCalls[idx]) toolCalls[idx] = { id: tc.id || "", name: "", arguments: "" };
-              if (tc.id) toolCalls[idx].id = tc.id;
-              if (tc.function?.name) toolCalls[idx].name = tc.function.name;
-              if (tc.function?.arguments) toolCalls[idx].arguments += tc.function.arguments;
-            }
-          }
-        } catch {}
+        handleLine(line);
+        if (streamDone) break;
       }
     }
+    // 最后一段可能没有换行结尾，之前会被直接丢掉。
+    if (!streamDone) {
+      buffer += decoder.decode();
+      if (buffer.trim()) handleLine(buffer);
+    } else {
+      reader.cancel().catch(() => {});
+    }
+
+    // tool_calls 的 index 不一定从 0 连续，去掉空洞；缺 id 时补一个，
+    // 否则 assistant.tool_calls[].id 与 tool.tool_call_id 对不上，下一轮请求会被拒。
+    const toolCalls = rawToolCalls
+      .filter((tc): tc is RuntimeToolCall => Boolean(tc && tc.name))
+      .map((tc, index) => ({ ...tc, id: tc.id || `tool_${Date.now()}_${index}` }));
 
     fullText += roundText;
-    if (!shouldSendTools || toolCalls.length === 0) break;
+    if (!shouldSendTools || toolCalls.length === 0) {
+      ranOutOfRounds = false;
+      break;
+    }
 
     currentMessages.push({
       role: "assistant",
@@ -745,6 +813,13 @@ export async function streamChat(
     });
 
     await executeRuntimeToolCalls(toolCalls, tools, currentMessages, options.onToolEvent);
+  }
+
+  if (ranOutOfRounds && !fullText.trim()) {
+    // 连续 5 轮都只在调工具、没有给出文字回复，避免最后落一条空消息。
+    const note = "（工具调用轮次已用完，模型没有给出最终答复。可以换个问法或让我继续。）";
+    fullText = note;
+    onChunk(note);
   }
 
   if (config.enableMemory !== false && (fullText.length > 30 || userText.length > 8)) {

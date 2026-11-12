@@ -180,10 +180,22 @@ const visionTools: Tool[] = [
       },
     },
     execute: async (args) =>
-      new Promise((resolve) => {
+      new Promise<string>((rawResolve) => {
+        // 这个 Promise 必须保证一定会 settle：用户取消选择、文件对话框因缺少用户手势被浏览器拦截、
+        // 网络请求抛错，之前都会让 Promise 永远挂起，整轮对话卡在“思考中”。
+        let settled = false;
+        const timer = window.setTimeout(() => resolve("等待选择图片超时（2 分钟），已取消。"), 120_000);
+        function resolve(value: string) {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timer);
+          rawResolve(value);
+        }
+
         const input = document.createElement("input");
         input.type = "file";
         input.accept = "image/*";
+        input.addEventListener("cancel", () => resolve("未选择图片"));
         input.onchange = async () => {
           const file = input.files?.[0];
           if (!file) {
@@ -193,6 +205,7 @@ const visionTools: Tool[] = [
 
           const reader = new FileReader();
           reader.onload = async () => {
+           try {
             const base64 = reader.result as string;
             const config = loadConfig();
             if (!config.apiKey) {
@@ -228,11 +241,18 @@ const visionTools: Tool[] = [
             const data = await resp.json();
             const content = data.choices?.[0]?.message?.content || "";
             resolve(`图片分析结果：\n\n${content}`);
+           } catch (error) {
+            resolve(`图片分析失败：${error}`);
+           }
           };
           reader.onerror = () => resolve("读取图片失败");
           reader.readAsDataURL(file);
         };
-        input.click();
+        try {
+          input.click();
+        } catch (error) {
+          resolve(`无法打开文件选择框：${error}`);
+        }
       }),
   },
 ];

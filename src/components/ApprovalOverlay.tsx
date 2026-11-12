@@ -14,7 +14,8 @@ const KIND_LABEL: Record<ApprovalKind, string> = {
  * 内联审批卡片：替代 tools.ts 里的 window.confirm 弹窗。
  * 只有真实产生 pending 审批时才会出现，不做演示用的假数据。
  */
-export function ApprovalOverlay() {
+/** compact：宠物窗口只有 340px，一次只展示一张卡片。 */
+export function ApprovalOverlay({ compact = false }: { compact?: boolean }) {
   const themeClass = useThemeClass();
   const approvals = useBotStore((state) => state.approvals);
   const bots = useBotStore((state) => state.bots);
@@ -24,9 +25,9 @@ export function ApprovalOverlay() {
   if (pending.length === 0) return null;
 
   return (
-    <div className={`${themeClass} pointer-events-none fixed inset-0 z-50 flex items-end justify-center p-4`}>
+    <div className={`${themeClass} pointer-events-none fixed inset-0 z-50 flex items-end justify-center ${compact ? "p-2" : "p-4"}`}>
       <div className="pointer-events-auto w-full max-w-md space-y-3">
-        {pending.slice(0, 3).map((request) => {
+        {pending.slice(0, compact ? 1 : 3).map((request) => {
           const bot = bots.find((item) => item.id === request.botId);
           return (
             <div

@@ -78,6 +78,19 @@ export function ChatPanel({ onOpenSettings, onBack }: ChatPanelProps) {
     }
   }, []);
 
+  useEffect(() => {
+    if (panelView !== "chat") setChatActive(false);
+  }, [panelView, setChatActive]);
+
+  useEffect(() => {
+    const onWindowBlur = () => setChatActive(false);
+    window.addEventListener("blur", onWindowBlur);
+    return () => {
+      window.removeEventListener("blur", onWindowBlur);
+      setChatActive(false);
+    };
+  }, [setChatActive]);
+
   const visibleMessages = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     if (!keyword) return messages;

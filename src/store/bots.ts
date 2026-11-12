@@ -190,6 +190,21 @@ function readString(key: string, fallback: string): string {
   }
 }
 
+const APPROVAL_TIMEOUT_MS = 120_000;
+const MAX_RESOLVED_APPROVALS = 50;
+
+function normalizeApprovals(list: ApprovalRequest[]): ApprovalRequest[] {
+  const now = Date.now();
+  const normalized = list.map((request) =>
+    request.status === "pending" && now - new Date(request.createdAt).getTime() > APPROVAL_TIMEOUT_MS + 10_000
+      ? { ...request, status: "expired" as const, resolvedAt: new Date(now).toISOString() }
+      : request
+  );
+  const pending = normalized.filter((request) => request.status === "pending");
+  const resolved = normalized.filter((request) => request.status !== "pending").slice(-MAX_RESOLVED_APPROVALS);
+  return [...resolved, ...pending];
+}
+
 function loadState() {
   const bots = readArray<BotProfile>(BOTS_KEY, defaultBots());
   const validBots = bots.filter((bot) => bot && typeof bot.id === "string" && typeof bot.name === "string");
@@ -200,7 +215,7 @@ function loadState() {
     return { ...bot, petAvatar: preset.petAvatar, petSkin: bot.petSkin || preset.petSkin };
   });
   const threads = readArray<BotThread>(THREADS_KEY, []);
-  const approvals = readArray<ApprovalRequest>(APPROVALS_KEY, []);
+  const approvals = normalizeApprovals(readArray<ApprovalRequest>(APPROVALS_KEY, []));
   const activeBotId = roster.some((bot) => bot.id === readString(ACTIVE_BOT_KEY, ""))
     ? readString(ACTIVE_BOT_KEY, "")
     : roster[0].id;
@@ -374,7 +389,7 @@ export const useBotStore = create<BotState>((set, get) => {
 
     requestApproval: (input) => {
       const request: ApprovalRequest = { ...input, id: uid("approval"), status: "pending", createdAt: nowIso() };
-      commit({ approvals: [...get().approvals, request] });
+      commit({ approvals: normalizeApprovals([...get().approvals, request]) });
       return request.id;
     },
 
@@ -424,13 +439,17 @@ export function useBotRosterSync() {
       if (event.key && watchedKeys.has(event.key)) replaceState(loadState());
     };
     window.addEventListener("storage", onStorage);
+    // listen() 是异步注册：如果 cleanup 先于注册完成（StrictMode 双挂载），要在注册完成后立刻注销。
+    let disposed = false;
     let unlisten: (() => void) | undefined;
     listen("bots-changed", () => replaceState(loadState()))
       .then((fn) => {
-        unlisten = fn;
+        if (disposed) fn();
+        else unlisten = fn;
       })
       .catch(() => {});
     return () => {
+      disposed = true;
       window.removeEventListener("storage", onStorage);
       unlisten?.();
     };

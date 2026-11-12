@@ -131,6 +131,9 @@ class PersonalityStore {
         const context = message.slice(Math.max(0, index - 10), Math.min(message.length, index + 20));
         if (!this.profile.interests.includes(context)) {
           this.profile.interests.push(context);
+          if (this.profile.interests.length > 30) {
+            this.profile.interests = this.profile.interests.slice(-30);
+          }
         }
       }
     }

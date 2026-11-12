@@ -177,9 +177,31 @@ class MemoryStore {
     }
   }
 
+  private dbCache = new Map<string, Promise<IDBDatabase>>();
+
+  /** 按库名缓存连接（库名随当前 Bot 变化）。 */
   private getDB(): Promise<IDBDatabase> {
+    const name = this.dbName;
+    const cached = this.dbCache.get(name);
+    if (cached) return cached;
+    const opening = this.openDB(name).then((db) => {
+      // 其他标签页/窗口升级数据库时主动让出连接，并让下次调用重新打开。
+      db.onversionchange = () => {
+        db.close();
+        this.dbCache.delete(name);
+      };
+      db.onclose = () => this.dbCache.delete(name);
+      return db;
+    });
+    opening.catch(() => this.dbCache.delete(name));
+    this.dbCache.set(name, opening);
+    return opening;
+  }
+
+  private openDB(name: string): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.dbName, 3);
+      const request = indexedDB.open(name, 3);
+      request.onblocked = () => reject(new Error("记忆库被其他窗口占用，请关闭多余窗口后重试"));
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains(this.storeName)) {
@@ -331,8 +353,16 @@ class MemoryStore {
       ...existing,
       ...updates,
       id,
-      signature: updates.signature || existing.signature || buildMemorySignature(existing.type, updates.content || existing.content, updates.tags || existing.tags),
-      normalizedContent: updates.normalizedContent || existing.normalizedContent || normalizeMemoryContent(updates.content || existing.content),
+      signature:
+        updates.signature ||
+        (updates.content !== undefined || updates.tags !== undefined || updates.type !== undefined
+          ? buildMemorySignature(updates.type || existing.type, updates.content ?? existing.content, updates.tags ?? existing.tags)
+          : existing.signature || buildMemorySignature(existing.type, existing.content, existing.tags)),
+      normalizedContent:
+        updates.normalizedContent ||
+        (updates.content !== undefined
+          ? normalizeMemoryContent(updates.content)
+          : existing.normalizedContent || normalizeMemoryContent(existing.content)),
       updatedAt: new Date().toISOString(),
     };
 
@@ -381,6 +411,7 @@ class MemoryStore {
       }));
 
       const ranked = scored
+        .filter((item) => item.score >= 0.3 || item.keywordScore > 0)
         .sort((a, b) => b.score + b.keywordScore - (a.score + a.keywordScore))
         .slice(0, limit)
         .map((item) => item.memory);
@@ -448,7 +479,17 @@ class MemoryStore {
       if (!parsed.memories || !Array.isArray(parsed.memories)) return [];
 
       const newMemories: Memory[] = [];
-      for (const item of parsed.memories) {
+      const validTypes: MemoryType[] = ["preference", "fact", "habit", "important", "task"];
+      for (const raw of parsed.memories) {
+        if (!raw || typeof raw.content !== "string" || !raw.content.trim()) continue;
+        const importance = Math.max(0, Math.min(10, Number(raw.importance) || 5));
+        const item = {
+          ...raw,
+          content: raw.content.trim(),
+          type: validTypes.includes(raw.type) ? (raw.type as MemoryType) : "fact",
+          tags: Array.isArray(raw.tags) ? raw.tags.filter((tag: unknown) => typeof tag === "string") : [],
+          importance,
+        };
         const candidateEmbedding = await this.getEmbedding(item.content);
         const existing = await this.search(item.content, 5);
         const isDuplicate =
@@ -459,11 +500,11 @@ class MemoryStore {
 
         const expiresIn = getDaysUntilExpiry(item.expiresIn || "never");
         const saved = await this.add({
-          type: item.type || "fact",
+          type: item.type,
           content: item.content,
-          tags: item.tags || [],
+          tags: item.tags,
           priority: item.importance >= 8 ? "high" : item.importance >= 5 ? "medium" : "low",
-          importance: item.importance || 5,
+          importance: item.importance,
           embedding: candidateEmbedding,
           expiresAt:
             expiresIn > 0
@@ -520,7 +561,8 @@ class MemoryStore {
         continue;
       }
 
-      await this.update(duplicate.id, this.mergeMemory(duplicate, memory));
+      const merged = await this.update(duplicate.id, this.mergeMemory(duplicate, memory));
+      if (merged) keepers[keepers.indexOf(duplicate)] = merged;
       await this.delete(memory.id);
       removed += 1;
     }
@@ -548,8 +590,8 @@ class MemoryStore {
 
     let totalImportance = 0;
     for (const memory of valid) {
-      byType[memory.type] += 1;
-      byPriority[memory.priority] += 1;
+      if (memory.type in byType) byType[memory.type] += 1;
+      if (memory.priority in byPriority) byPriority[memory.priority] += 1;
       totalImportance += memory.importance;
     }
 
@@ -578,9 +620,13 @@ class MemoryStore {
     }
   }
 
+  private embeddingUnsupportedUntil = new Map<string, number>();
+
   private async getEmbedding(text: string): Promise<number[] | undefined> {
     const config = loadConfig();
     if (!config.apiKey) return undefined;
+    const endpointKey = `${config.baseUrl}|${getEmbeddingModel(config)}`;
+    if ((this.embeddingUnsupportedUntil.get(endpointKey) || 0) > Date.now()) return undefined;
 
     try {
       const resp = await fetch(`${config.baseUrl.replace(/\/+$/, "")}/embeddings`, {
@@ -591,9 +637,16 @@ class MemoryStore {
           input: text.slice(0, 8000),
         }),
       });
-      if (!resp.ok) return undefined;
+      if (!resp.ok) {
+        // 4xx 基本说明这个端点/模型不支持向量，30 分钟内不再尝试。
+        if (resp.status >= 400 && resp.status < 500) {
+          this.embeddingUnsupportedUntil.set(endpointKey, Date.now() + 30 * 60_000);
+        }
+        return undefined;
+      }
       const data = await resp.json();
-      return data.data?.[0]?.embedding;
+      const embedding = data.data?.[0]?.embedding;
+      return Array.isArray(embedding) ? embedding : undefined;
     } catch {
       return undefined;
     }

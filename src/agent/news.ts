@@ -1,3 +1,5 @@
+import { BROWSER_USER_AGENT, fetchExternal } from "./http";
+
 export interface NewsItem {
   title: string;
   link?: string;
@@ -49,8 +51,10 @@ function parseDuckDuckGo(html: string): NewsItem[] {
 }
 
 async function fetchText(url: string) {
-  const resp = await fetch(url, {
+  // 新闻站点不返回 CORS 头，WebView 里直接 fetch 会被拦截，必须走 Rust 侧 HTTP。
+  const resp = await fetchExternal(url, {
     headers: {
+      "User-Agent": BROWSER_USER_AGENT,
       Accept: "application/rss+xml, application/xml, text/html;q=0.9, */*;q=0.8",
     },
   });
@@ -115,13 +119,18 @@ export function formatNewsMarkdown(items: NewsItem[], title = "今日新闻速�
   return [`## ${title}`, "", ...lines, "", `> 更新时间：${new Date().toLocaleString("zh-CN")}`].join("\n");
 }
 
+// 每个触发来源单独记录推送日期；之前共用一个 key 只存“最后一次”，
+// greeting 与 ok 交替出现时同一批新闻会被反复推送。
+function pushKey(trigger: NewsPushTrigger) {
+  return `${NEWS_PUSH_KEY}_${trigger}`;
+}
+
 export function shouldPushTodayNews(trigger: NewsPushTrigger) {
-  const key = `${todayKey()}_${trigger}`;
-  return localStorage.getItem(NEWS_PUSH_KEY) !== key;
+  return localStorage.getItem(pushKey(trigger)) !== todayKey();
 }
 
 export function markTodayNewsPushed(trigger: NewsPushTrigger) {
-  localStorage.setItem(NEWS_PUSH_KEY, `${todayKey()}_${trigger}`);
+  localStorage.setItem(pushKey(trigger), todayKey());
 }
 
 export function formatNewsBubble(item: NewsItem, index: number, total: number) {

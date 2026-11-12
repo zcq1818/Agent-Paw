@@ -139,7 +139,6 @@ export function BotRoster({ onClose }: BotRosterProps) {
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
-    switchBot(id);
   };
 
   const handleCreate = () => {

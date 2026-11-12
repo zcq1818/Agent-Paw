@@ -5,10 +5,11 @@ import { useActivityStore } from "../store/activity";
 import { memoryStore } from "./memory";
 import { personalityStore } from "./personality";
 import { customSkillsStore } from "./customSkills";
-import { fetchTodayNews, formatNewsBubble, formatNewsMarkdown, markTodayNewsPushed } from "./news";
+import { fetchTodayNews, formatNewsBubble, formatNewsMarkdown, markTodayNewsPushed, shouldPushTodayNews } from "./news";
 import { selectProactivePlan } from "./decision";
 
-type SpeakFn = (message: string, duration?: number) => void;
+type PetPose = "idle" | "walk" | "sit" | "sleep" | "excited" | "thinking" | "morning" | "night" | "dance" | "stretch" | "look" | "wave";
+type SpeakFn = (message: string, duration?: number, pose?: PetPose) => void;
 
 interface UsePetProactivityOptions {
   shouldPauseMotion: () => boolean;
@@ -74,11 +75,16 @@ export function usePetProactivity({
 }: UsePetProactivityOptions) {
   const cooldownsRef = useRef<Cooldowns>(loadCooldowns());
   const runningRef = useRef(false);
+  const callbacksRef = useRef({ shouldPauseMotion, speak, setPetState, addMessage });
+  callbacksRef.current = { shouldPauseMotion, speak, setPetState, addMessage };
 
   useEffect(() => {
     if (!enableInteractions && !autoAction) return;
 
     let disposed = false;
+    const shouldPauseMotion = () => callbacksRef.current.shouldPauseMotion();
+    const speak: SpeakFn = (...args) => callbacksRef.current.speak(...args);
+    const addMessage = (message: { role: "assistant"; content: string }) => callbacksRef.current.addMessage(message);
 
     const run = async () => {
       if (disposed || runningRef.current || shouldPauseMotion()) return;
@@ -87,18 +93,25 @@ export function usePetProactivity({
 
       runningRef.current = true;
       try {
+        // 只统计用户自己的消息；助手回复里的“已打开…”不应算作用户需求。
         const messages = useChatStore
           .getState()
           .messages.slice(-16)
+          .filter((message) => message.role === "user")
           .map((message) => message.content);
         const activity = useActivityStore.getState();
         const recentTouchMinutes = minutesSince(lastHumanTouchRef.current || Date.now());
         const activitySummary = activity.enabled ? activity.getSummary() : "";
         const memoryCount = (await memoryStore.getStats()).total;
         const smartSuggestions = await personalityStore.getSmartSuggestions();
-        const newsItems = autonomousNews && !isCooldownActive(cooldownsRef.current, "news", NEWS_COOLDOWN_MS)
-          ? await fetchTodayNews()
-          : [];
+        const cooldowns = cooldownsRef.current;
+        // 新闻按天缓存，同一批内容一天只主动推一次。
+        const newsAllowed =
+          autonomousNews && shouldPushTodayNews("autonomous") && !isCooldownActive(cooldowns, "news", NEWS_COOLDOWN_MS);
+        const newsItems = newsAllowed ? await fetchTodayNews() : [];
+        const skillExists = customSkillsStore
+          .getAll()
+          .some((skill) => skill.tags.includes("autonomous-learning") && skill.name === "常用应用操作助手");
 
         const plan = selectProactivePlan({
           hour: new Date().getHours(),
@@ -112,6 +125,13 @@ export function usePetProactivity({
           newsItems,
           smartSuggestions,
           recentUserMessages: messages,
+          blocked: {
+            news: !newsAllowed,
+            activity: isCooldownActive(cooldowns, "activity", ACTIVITY_COOLDOWN_MS),
+            suggestion: isCooldownActive(cooldowns, "suggestion", SUGGESTION_COOLDOWN_MS),
+            memory: isCooldownActive(cooldowns, "memory", MEMORY_COOLDOWN_MS),
+            skill: skillExists || isCooldownActive(cooldowns, "skill", SKILL_COOLDOWN_MS),
+          },
         });
 
         if (!plan) return;
@@ -120,12 +140,12 @@ export function usePetProactivity({
 
         if (plan.kind === "news") {
           markCooldown(cooldownsRef.current, "news");
+          markTodayNewsPushed("autonomous");
           addMessage({ role: "assistant", content: formatNewsMarkdown(plan.items, plan.title) });
           plan.items.slice(0, 3).forEach((item, index) => {
             window.setTimeout(() => {
               if (disposed || shouldPauseMotion()) return;
-              setPetState("wave");
-              speak(formatNewsBubble(item, index, Math.min(plan.items.length, 3)), 7500);
+              speak(formatNewsBubble(item, index, Math.min(plan.items.length, 3)), 7500, "wave");
             }, index * 2200);
           });
           speak("我把今天新闻整理好了，已经放到聊天里。", 4200);
@@ -185,12 +205,14 @@ export function usePetProactivity({
       }
     };
 
-    const timer = window.setInterval(run, 11 * 60_000);
-    window.setTimeout(run, 12_000);
+    // 间隔要大于 MIN_RUN_INTERVAL_MS，否则每隔一轮就会被最小间隔挡掉。
+    const timer = window.setInterval(run, MIN_RUN_INTERVAL_MS + 60_000);
+    const startup = window.setTimeout(run, 12_000);
 
     return () => {
       disposed = true;
       window.clearInterval(timer);
+      window.clearTimeout(startup);
     };
-  }, [addMessage, autonomousLearning, autonomousNews, autoAction, enableInteractions, lastHumanTouchRef, shouldPauseMotion, setPetState, speak]);
+  }, [autonomousLearning, autonomousNews, autoAction, enableInteractions, lastHumanTouchRef]);
 }

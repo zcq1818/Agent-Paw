@@ -98,15 +98,31 @@ function trimBubbleText(text: string) {
   return cleaned.length > 140 ? `${cleaned.slice(0, 140)}...` : cleaned;
 }
 
-function centerOfWindow(position: { x: number; y: number }) {
-  return { x: position.x + PET_SIZE.width / 2, y: position.y + PET_SIZE.height / 2 };
+/**
+ * 工作区、窗口位置、鼠标坐标都是物理像素，而 PET_SIZE / CHAT_SIZE 是逻辑像素（setSize 用 LogicalSize）。
+ * 屏幕缩放不是 100% 时必须换算，否则贴边计算会把窗口放出屏幕或离边缘太远。
+ */
+function scaleFactor() {
+  return window.devicePixelRatio || 1;
 }
 
-function clampToWorkArea(target: { x: number; y: number }, work: WorkArea, size = PET_SIZE) {
-  const minX = work.position.x + EDGE_PADDING;
-  const minY = work.position.y + EDGE_PADDING;
-  const maxX = work.position.x + work.size.width - size.width - EDGE_PADDING;
-  const maxY = work.position.y + work.size.height - size.height - EDGE_PADDING;
+function physicalSize(size: { width: number; height: number }) {
+  const scale = scaleFactor();
+  return { width: Math.round(size.width * scale), height: Math.round(size.height * scale) };
+}
+
+function centerOfWindow(position: { x: number; y: number }) {
+  const size = physicalSize(PET_SIZE);
+  return { x: position.x + size.width / 2, y: position.y + size.height / 2 };
+}
+
+function clampToWorkArea(target: { x: number; y: number }, work: WorkArea, logicalSize = PET_SIZE) {
+  const size = physicalSize(logicalSize);
+  const padding = Math.round(EDGE_PADDING * scaleFactor());
+  const minX = work.position.x + padding;
+  const minY = work.position.y + padding;
+  const maxX = Math.max(minX, work.position.x + work.size.width - size.width - padding);
+  const maxY = Math.max(minY, work.position.y + work.size.height - size.height - padding);
   return {
     x: Math.round(clamp(target.x, minX, maxX)),
     y: Math.round(clamp(target.y, minY, maxY)),
@@ -256,9 +272,9 @@ export function Pet() {
   }, [setEmotion, timeOfDay]);
 
   const speak = useCallback(
-    (message: string, duration = 6500) => {
+    (message: string, duration = 6500, pose: PetState = "excited") => {
       setBubbleMessage(trimBubbleText(message));
-      setPetState("excited");
+      setPetState(pose);
       setEmotion("excited");
       lastSpokenRef.current = Date.now();
       adjustLife({ affection: 1, energy: -0.4 });
@@ -379,9 +395,10 @@ export function Pet() {
     }
 
     const current = await getCurrentWindow().outerPosition();
+    const petPx = physicalSize(PET_SIZE);
     let target = {
-      x: rand(work.position.x + 40, work.position.x + work.size.width - PET_SIZE.width - 40),
-      y: rand(work.position.y + 40, work.position.y + work.size.height - PET_SIZE.height - 40),
+      x: rand(work.position.x + 40, work.position.x + work.size.width - petPx.width - 40),
+      y: rand(work.position.y + 40, work.position.y + work.size.height - petPx.height - 40),
     };
 
     if (roamScope === "nearby") {
@@ -390,8 +407,8 @@ export function Pet() {
         y: current.y + rand(-180, 220),
       };
     } else if (roamScope === "corner") {
-      const right = work.position.x + work.size.width - PET_SIZE.width - 48;
-      const bottom = work.position.y + work.size.height - PET_SIZE.height - 48;
+      const right = work.position.x + work.size.width - petPx.width - 48;
+      const bottom = work.position.y + work.size.height - petPx.height - 48;
       target = {
         x: right + rand(-220, 40),
         y: bottom + rand(-160, 40),
@@ -406,8 +423,8 @@ export function Pet() {
         const awayY = centerOfWindow(current).y < cursor.y ? -180 : 120;
         target = { x: current.x + awayX + rand(-60, 60), y: current.y + awayY + rand(-60, 60) };
       } else if (!avoidCursor && (action > 0.72 || gap < 380)) {
-        const offsetX = rand(-PET_SIZE.width * 0.75, PET_SIZE.width * 0.75);
-        const offsetY = rand(70, PET_SIZE.height * 0.95);
+        const offsetX = rand(-petPx.width * 0.75, petPx.width * 0.75);
+        const offsetY = rand(70, petPx.height * 0.95);
         target = { x: cursor.x + offsetX, y: cursor.y + offsetY };
       }
     } catch {}
@@ -481,9 +498,8 @@ export function Pet() {
     }
 
     if (roll < 0.66) {
-      setPetState("wave");
       adjustLife({ affection: 1, energy: -0.5 });
-      speak("我还在这里陪着你。", 3200);
+      speak("我还在这里陪着你。", 3200, "wave");
       return;
     }
 
@@ -502,7 +518,18 @@ export function Pet() {
     setShowMiniChat(true);
     setShowMenu(false);
     setBubbleMessage(null);
-    resizePetWindow(true);
+    resizePetWindow(true).then(async () => {
+      try {
+        const appWindow = getCurrentWindow();
+        const [work, pos] = await Promise.all([getActiveWorkArea(), appWindow.outerPosition()]);
+        const safe = clampToWorkArea(pos, work, CHAT_SIZE);
+        if (safe.x !== pos.x || safe.y !== pos.y) {
+          await appWindow.setPosition(new PhysicalPosition(safe.x, safe.y));
+        }
+      } catch {
+        // Browser dev fallback.
+      }
+    });
   }, [markHumanTouch, pauseMotion]);
 
   const closeMiniChat = useCallback(() => {
@@ -551,23 +578,42 @@ export function Pet() {
     return () => window.clearInterval(timer);
   }, [tickLife]);
 
+  const speakRef = useRef(speak);
+  speakRef.current = speak;
+  const adjustLifeRef = useRef(adjustLife);
+  adjustLifeRef.current = adjustLife;
+  const wanderRef = useRef(wander);
+  wanderRef.current = wander;
+  const reactToCursorRef = useRef(reactToCursor);
+  reactToCursorRef.current = reactToCursor;
+  const performIdleActionRef = useRef(performIdleAction);
+  performIdleActionRef.current = performIdleAction;
+  const triggerRandomInteractionRef = useRef(triggerRandomInteraction);
+  triggerRandomInteractionRef.current = triggerRandomInteraction;
+
   useEffect(() => {
+    // listen() 是异步的：cleanup 先于注册完成时要立刻注销，否则会重复监听（同一句话说两遍）。
+    let disposed = false;
     const unlisteners: Array<() => void> = [];
+    const track = (fn: () => void) => {
+      if (disposed) fn();
+      else unlisteners.push(fn);
+    };
     async function setupListeners() {
       try {
-        const unlistenSay = await listen<{ message: string }>("pet-say", (event) => {
-          if (event.payload?.message) speak(event.payload.message, 9000);
-        });
-        const unlistenNews = await listen<{ title?: string; items?: string[] }>("pet-news", (event) => {
+        track(await listen<{ message: string }>("pet-say", (event) => {
+          if (event.payload?.message) speakRef.current(event.payload.message, 9000);
+        }));
+        track(await listen<{ title?: string; items?: string[] }>("pet-news", (event) => {
           const title = event.payload?.title || "今日新闻速览";
           const items = (event.payload?.items || []).filter(Boolean).slice(0, 3);
           setNewsBanner({ title, items });
-          adjustLife({ curiosity: -3, affection: 1, energy: -1 });
+          adjustLifeRef.current({ curiosity: -3, affection: 1, energy: -1 });
           window.setTimeout(() => {
             setNewsBanner((current) => (current?.title === title ? null : current));
           }, 12000);
-        });
-        const unlistenRoutine = await listen<{ title?: string; subtitle?: string; items?: string[] }>("pet-routine", (event) => {
+        }));
+        track(await listen<{ title?: string; subtitle?: string; items?: string[] }>("pet-routine", (event) => {
           const title = event.payload?.title || "今日安排";
           const subtitle = event.payload?.subtitle || "按节奏走就好";
           const items = (event.payload?.items || []).filter(Boolean).slice(0, 3);
@@ -575,25 +621,27 @@ export function Pet() {
           window.setTimeout(() => {
             setRoutineBanner((current) => (current?.title === title ? null : current));
           }, 14000);
-        });
-        const unlistenThinking = await listen("pet-thinking", () => {
+        }));
+        track(await listen("pet-thinking", () => {
           setPetState("thinking");
-        });
-        const unlistenChat = await listen<{ active: boolean }>("chat-activity", (event) => {
+        }));
+        track(await listen<{ active: boolean }>("chat-activity", (event) => {
           chatActiveRef.current = Boolean(event.payload?.active);
           if (chatActiveRef.current) {
             pauseMotion(2500);
           }
-        });
-        unlisteners.push(unlistenSay, unlistenNews, unlistenRoutine, unlistenThinking, unlistenChat);
+        }));
       } catch {
         // Browser dev fallback.
       }
     }
 
     setupListeners();
-    return () => unlisteners.forEach((unlisten) => unlisten());
-  }, [adjustLife, pauseMotion, speak]);
+    return () => {
+      disposed = true;
+      unlisteners.forEach((unlisten) => unlisten());
+    };
+  }, [pauseMotion]);
 
   useEffect(() => {
     if (!enableInteractions) return;
@@ -608,32 +656,41 @@ export function Pet() {
   useEffect(() => {
     if (!enableInteractions) return;
     interactionTimerRef.current = window.setInterval(
-      triggerRandomInteraction,
+      () => triggerRandomInteractionRef.current(),
       FREQUENCY_INTERVALS[interactionFrequency]
     );
     return () => {
       if (interactionTimerRef.current) window.clearInterval(interactionTimerRef.current);
     };
-  }, [enableInteractions, interactionFrequency, triggerRandomInteraction]);
+  }, [enableInteractions, interactionFrequency]);
 
   useEffect(() => {
     if (!autoAction) return;
-    roamTimerRef.current = window.setInterval(wander, ACTION_INTERVALS[interactionFrequency]);
-    attentionTimerRef.current = window.setInterval(reactToCursor, 1400);
+    roamTimerRef.current = window.setInterval(() => {
+      wanderRef.current().catch(() => {});
+    }, ACTION_INTERVALS[interactionFrequency]);
+    attentionTimerRef.current = window.setInterval(() => {
+      reactToCursorRef.current().catch(() => {});
+    }, 1400);
     idleActionTimerRef.current = window.setInterval(() => {
-      performIdleAction().catch(() => {});
+      performIdleActionRef.current().catch(() => {});
     }, 22_000);
-    window.setTimeout(wander, 1800);
-    window.setTimeout(() => {
-      performIdleAction(true).catch(() => {});
+    // 启动时的一次性动作：要随 effect 一起清理，且不带 force（尊重暂停、免打扰与“刚被碰过”的保护）。
+    const startupWander = window.setTimeout(() => {
+      wanderRef.current().catch(() => {});
+    }, 1800);
+    const startupIdle = window.setTimeout(() => {
+      performIdleActionRef.current().catch(() => {});
     }, 5200);
 
     return () => {
       if (roamTimerRef.current) window.clearInterval(roamTimerRef.current);
       if (attentionTimerRef.current) window.clearInterval(attentionTimerRef.current);
       if (idleActionTimerRef.current) window.clearInterval(idleActionTimerRef.current);
+      window.clearTimeout(startupWander);
+      window.clearTimeout(startupIdle);
     };
-  }, [autoAction, interactionFrequency, performIdleAction, reactToCursor, wander]);
+  }, [autoAction, interactionFrequency]);
 
   useEffect(() => {
     if (emotion === "thinking") {
@@ -661,21 +718,18 @@ export function Pet() {
     markHumanTouch();
     pauseMotion(1600);
     setShowMenu(false);
+    const drag = {
+      pointerStart: { x: event.screenX, y: event.screenY },
+      windowStart: { x: 0, y: 0 },
+      moved: false,
+      nativeStarted: false,
+    };
+    dragRef.current = drag;
     try {
       const pos = await getCurrentWindow().outerPosition();
-      dragRef.current = {
-        pointerStart: { x: event.screenX, y: event.screenY },
-        windowStart: { x: pos.x, y: pos.y },
-        moved: false,
-        nativeStarted: false,
-      };
+      drag.windowStart = { x: pos.x, y: pos.y };
     } catch {
-      dragRef.current = {
-        pointerStart: { x: event.screenX, y: event.screenY },
-        windowStart: { x: 0, y: 0 },
-        moved: false,
-        nativeStarted: false,
-      };
+      // Browser dev fallback.
     }
   }, [markHumanTouch, pauseMotion]);
 
@@ -683,6 +737,12 @@ export function Pet() {
     const onPointerMove = async (event: PointerEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
+      if (!(event.buttons & 1)) {
+        // 松手事件被系统拖拽循环吞掉时，这里兜底结束拖拽状态。
+        dragRef.current = null;
+        setIsDragging(false);
+        return;
+      }
       const dx = event.screenX - drag.pointerStart.x;
       const dy = event.screenY - drag.pointerStart.y;
       if (Math.abs(dx) + Math.abs(dy) < 6) return;
@@ -720,9 +780,11 @@ export function Pet() {
 
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
     return () => {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
     };
   }, [resetToDefaultState, snapInsideWorkArea]);
 
@@ -784,14 +846,15 @@ export function Pet() {
       const queue = items.slice(0, 5);
       queue.forEach((item, index) => {
         window.setTimeout(() => {
-          setPetState("wave");
-          speak(formatNewsBubble(item, index, queue.length), 9000);
+          speak(formatNewsBubble(item, index, queue.length), 9000, "wave");
         }, index * 1800);
       });
     } catch {
       speak("新闻源今天有点不给力，我没有拉取成功。");
     }
   }, [addMessage, speak]);
+
+  const closeBubble = useCallback(() => setBubbleMessage(null), []);
 
   const handlePetPointerEnter = useCallback(() => {
     hoverPetRef.current = true;
@@ -816,7 +879,7 @@ export function Pet() {
         <PetBubble
           message={bubbleMessage}
           isVisible={true}
-          onClose={() => setBubbleMessage(null)}
+          onClose={closeBubble}
           onOpen={openMiniChat}
           autoClose={7200}
         />
@@ -958,8 +1021,8 @@ export function Pet() {
 
       {showMenu && (
         <div
-          className="absolute z-50 min-w-[156px] rounded-xl border border-gray-700 bg-gray-900/95 py-1 shadow-2xl backdrop-blur pointer-events-auto"
-          style={{ left: menuLeft, top: menuTop }}
+          className="absolute z-50 min-w-[156px] overflow-y-auto rounded-xl border border-gray-700 bg-gray-900/95 py-1 shadow-2xl backdrop-blur pointer-events-auto"
+          style={{ left: menuLeft, top: menuTop, maxHeight: `calc(100vh - ${menuTop + 8}px)` }}
         >
           <MenuItem label="聊天" onClick={() => { setShowMenu(false); openMiniChat(); }} />
           <MenuItem label="打开工作台" onClick={() => { setShowMenu(false); showMainWindow("chat"); }} />

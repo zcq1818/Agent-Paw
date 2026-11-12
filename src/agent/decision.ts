@@ -13,6 +13,8 @@ export interface ProactiveContext {
   newsItems: NewsItem[];
   smartSuggestions: SmartSuggestion[];
   recentUserMessages: string[];
+  /** 处于冷却期（或已无意义，如 Skill 已存在）的计划类型，选择时直接跳过。 */
+  blocked?: Partial<Record<ProactivePlan["kind"], boolean>>;
 }
 
 export type ProactivePlan =
@@ -89,7 +91,8 @@ export function selectProactivePlan(context: ProactiveContext): ProactivePlan | 
     });
   }
 
-  const appRequests = countMatches(context.recentUserMessages, /(打开|启动|运行|open|launch|start)/i);
+  // 英文词加单词边界，避免 restart / startup 之类误计数。
+  const appRequests = countMatches(context.recentUserMessages, /打开|启动|运行|\b(open|launch|start)\b/i);
   if (context.autonomousLearning && appRequests >= 3) {
     plans.push({
       kind: "skill",
@@ -100,6 +103,9 @@ export function selectProactivePlan(context: ProactiveContext): ProactivePlan | 
     });
   }
 
-  if (plans.length === 0) return null;
-  return plans.sort((a, b) => b.priority - a.priority)[0];
+  // 之前冷却只写不读：同一条建议 / 活动摘要每轮都会重复推送；
+  // Skill 计划优先级最高，创建后仍会一直胜出，把其他计划全部饿死。
+  const available = plans.filter((plan) => !context.blocked?.[plan.kind]);
+  if (available.length === 0) return null;
+  return available.sort((a, b) => b.priority - a.priority)[0];
 }

@@ -28,6 +28,11 @@ export function scopeKey(base: string): string {
   return id === DEFAULT_BOT_ID ? base : `${base}__${safeId(id)}`;
 }
 
+/** 指定 Bot 的分区 key（不依赖当前激活的 Bot）。 */
+export function scopeKeyFor(base: string, botId: string): string {
+  return botId === DEFAULT_BOT_ID ? base : `${base}__${safeId(botId)}`;
+}
+
 export function isDefaultBot(): boolean {
   return getActiveBotId() === DEFAULT_BOT_ID;
 }

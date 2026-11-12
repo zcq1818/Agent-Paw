@@ -55,6 +55,8 @@ interface PetState extends PetConfig {
   setQuietStart: (value: string) => void;
   setQuietEnd: (value: string) => void;
   refreshTimeOfDay: () => void;
+  /** 设置页在工作台窗口保存后，宠物窗口据此重新载入配置。 */
+  syncFromStorage: () => void;
 }
 
 const DEFAULT_LIFE: LifeStats = { energy: 80, affection: 60, curiosity: 55 };
@@ -78,16 +80,18 @@ function getTimeOfDay(): TimeOfDay {
   return "night";
 }
 
+export const PET_CONFIG_KEY = "paw_pet_config";
+
 function loadPetConfig(): Partial<PetConfig> {
   try {
-    const saved = localStorage.getItem("paw_pet_config");
+    const saved = localStorage.getItem(PET_CONFIG_KEY);
     if (saved) return JSON.parse(saved);
   } catch {}
   return {};
 }
 
 function savePetConfig(config: PetConfig) {
-  localStorage.setItem("paw_pet_config", JSON.stringify(config));
+  localStorage.setItem(PET_CONFIG_KEY, JSON.stringify(config));
 }
 
 function persist(get: () => PetState, updates: Partial<PetConfig> = {}) {
@@ -213,4 +217,25 @@ export const usePetStore = create<PetState>((set, get) => ({
     persist(get, { quietEnd });
   },
   refreshTimeOfDay: () => set({ timeOfDay: getTimeOfDay() }),
+  syncFromStorage: () => {
+    const config = loadPetConfig();
+    const state = get();
+    set({
+      name: config.name || state.name,
+      skin: config.skin || state.skin,
+      avatar: config.avatar || state.avatar,
+      autoAction: config.autoAction ?? state.autoAction,
+      enableInteractions: config.enableInteractions ?? state.enableInteractions,
+      interactionFrequency: config.interactionFrequency || state.interactionFrequency,
+      size: config.size || state.size,
+      opacity: config.opacity ?? state.opacity,
+      roamScope: config.roamScope || state.roamScope,
+      avoidCursor: config.avoidCursor ?? state.avoidCursor,
+      autonomousNews: config.autonomousNews ?? state.autonomousNews,
+      autonomousLearning: config.autonomousLearning ?? state.autonomousLearning,
+      quietHoursEnabled: config.quietHoursEnabled ?? state.quietHoursEnabled,
+      quietStart: config.quietStart || state.quietStart,
+      quietEnd: config.quietEnd || state.quietEnd,
+    });
+  },
 }));

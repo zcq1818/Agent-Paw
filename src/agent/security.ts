@@ -113,12 +113,9 @@ class SecurityManager {
       return { valid: false, error: "请输入内容。" };
     }
 
-    const xssPatterns = [/<script/i, /javascript:/i, /on\w+\s*=/i, /<iframe/i, /<object/i, /<embed/i];
-    for (const pattern of xssPatterns) {
-      if (pattern.test(input)) {
-        return { valid: false, error: "输入包含不安全的脚本内容，已被拦截。" };
-      }
-    }
+    // 不再按“XSS 特征”拦截用户输入：/on\w+\s*=/ 会命中 response = …、condition = … 这类普通代码，
+    // 问 <script> / <iframe> 用法的问题也会被拒。用户输入只发给模型，界面渲染由 React 转义，
+    // 这里拦截没有安全收益，只会误伤。
 
     let sanitized = input.replace(/<[^>]*>/g, "");
     sanitized = sanitized.replace(/javascript:/gi, "");
@@ -292,7 +289,9 @@ class SecurityManager {
         };
       }
 
-      const result = await this.withRetry(fn, { maxRetries: 2, delayMs: 500 });
+      // 工具不能自动重试：很多工具有副作用（打开网页/应用、写入待办、弹审批卡），
+      // 失败后重跑会让用户看到多张审批卡、甚至重复执行动作。
+      const result = await fn();
       personalityStore.recordToolUsage(toolName);
       this.log("info", "tool", `Tool ${toolName} completed`);
       return { success: true, result };
