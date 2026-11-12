@@ -11,7 +11,7 @@ import {
 import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { PetBubble } from "./PetBubble";
-import { PixelPetSprite } from "./PixelPetSprite";
+import { BUILTIN_AVATARS, describeAvatar, loadCustomAvatars } from "../store/petAvatars";
 import { usePetStore } from "../store/pet";
 import { useChatStore } from "../store/chat";
 import { useAgentStore } from "../store/agent";
@@ -34,6 +34,7 @@ const CHAT_SIZE = { width: 440, height: 560 };
 const SPRITE_SIZE = 128;
 const EDGE_PADDING = 14;
 const Pikachu3D = lazy(() => import("./Pikachu3D").then((module) => ({ default: module.Pikachu3D })));
+const RiggedPet3D = lazy(() => import("./RiggedPet3D").then((module) => ({ default: module.RiggedPet3D })));
 
 const FREQUENCY_INTERVALS: Record<"rare" | "normal" | "frequent", number> = {
   rare: 46_000,
@@ -207,6 +208,8 @@ export function Pet() {
 
   const emotion = usePetStore((state) => state.emotion);
   const avatar = usePetStore((state) => state.avatar);
+  const petName = usePetStore((state) => state.name);
+  const avatarInfo = describeAvatar(avatar);
   const autoAction = usePetStore((state) => state.autoAction);
   const timeOfDay = usePetStore((state) => state.timeOfDay);
   const enableInteractions = usePetStore((state) => state.enableInteractions);
@@ -808,12 +811,13 @@ export function Pet() {
     speak(`${interaction.emoji} ${interaction.message}`);
   }, [adjustLife, isDragging, markHumanTouch, pauseMotion, speak]);
 
-  const cycleAvatar = useCallback(() => {
-    const avatars = ["pixel_pikachu", "pixel_cat", "pixel_dog", "toon_pikachu"] as const;
-    const next = avatars[(avatars.indexOf(avatar) + 1) % avatars.length];
-    setAvatar(next);
-    setPetState("excited");
-    speak(next === "pixel_cat" ? "喵~ 换成像素猫了。" : next === "pixel_dog" ? "汪~ 换成像素狗了。" : "皮卡~ 换好外观了。");
+  const cycleAvatar = useCallback(async () => {
+    const options = [...(await loadCustomAvatars()), ...BUILTIN_AVATARS];
+    const index = options.findIndex((option) => option.value === avatar);
+    const next = options[(index + 1) % options.length];
+    setAvatar(next.value);
+    setPetState("wave");
+    speak(`换成「${next.label}」啦~`, 4000, "wave");
   }, [avatar, setAvatar, speak]);
 
   const feedPet = useCallback(() => {
@@ -896,16 +900,16 @@ export function Pet() {
 
       {newsBanner && !showMiniChat && (
         <button
-          className="absolute left-4 right-4 top-4 z-40 rounded-2xl border border-yellow-200/80 bg-[#fff9d6]/95 px-4 py-3 text-left shadow-xl backdrop-blur pointer-events-auto"
+          className="absolute left-4 right-4 top-4 z-40 rounded-2xl border border-line bg-surface/95 text-fg px-4 py-3 text-left shadow-xl backdrop-blur pointer-events-auto"
           onClick={openMiniChat}
           onDoubleClick={() => showMainWindow("chat")}
           title="双击打开完整聊天"
         >
           <div className="mb-1 flex items-center justify-between gap-3">
-            <div className="text-sm font-semibold text-gray-900">{newsBanner.title}</div>
-            <div className="text-[11px] text-gray-500">主动播报</div>
+            <div className="text-sm font-semibold text-fg">{newsBanner.title}</div>
+            <div className="text-[11px] text-fg-muted">主动播报</div>
           </div>
-          <div className="space-y-1 text-xs text-gray-700">
+          <div className="space-y-1 text-xs text-fg/80">
             {newsBanner.items.map((item, index) => (
               <div key={`${newsBanner.title}-${index}`} className="line-clamp-1">
                 {index + 1}. {item}
@@ -917,16 +921,16 @@ export function Pet() {
 
       {routineBanner && !showMiniChat && (
         <button
-          className="absolute left-4 right-4 top-[116px] z-40 rounded-2xl border border-sky-200/80 bg-[#eef9ff]/95 px-4 py-3 text-left shadow-xl backdrop-blur pointer-events-auto"
+          className="absolute left-4 right-4 top-[116px] z-40 rounded-2xl border border-line bg-surface/95 text-fg px-4 py-3 text-left shadow-xl backdrop-blur pointer-events-auto"
           onClick={openMiniChat}
           onDoubleClick={() => showMainWindow("chat")}
           title="双击打开完整聊天"
         >
           <div className="mb-1 flex items-center justify-between gap-3">
-            <div className="text-sm font-semibold text-gray-900">{routineBanner.title}</div>
-            <div className="text-[11px] text-gray-500">{routineBanner.subtitle}</div>
+            <div className="text-sm font-semibold text-fg">{routineBanner.title}</div>
+            <div className="text-[11px] text-fg-muted">{routineBanner.subtitle}</div>
           </div>
-          <div className="space-y-1 text-xs text-gray-700">
+          <div className="space-y-1 text-xs text-fg/80">
             {routineBanner.items.map((item, index) => (
               <div key={`${routineBanner.title}-${index}`} className="line-clamp-1">
                 {index + 1}. {item}
@@ -937,7 +941,7 @@ export function Pet() {
       )}
 
       {!showMiniChat && showVitals && (
-        <div className="absolute bottom-3 left-3 z-20 w-32 rounded-xl border border-white/50 bg-white/80 p-2 text-[11px] text-gray-800 shadow-lg backdrop-blur pointer-events-none transition-opacity duration-200">
+        <div className="absolute bottom-3 left-3 z-20 w-32 rounded-xl border border-line bg-surface/90 p-2 text-[11px] text-fg shadow-lg backdrop-blur pointer-events-none transition-opacity duration-200">
           <div className="mb-1 font-semibold">{lifeMood}</div>
           <LifeBar label="精力" value={life.energy} color="bg-emerald-400" />
           <LifeBar label="亲密" value={life.affection} color="bg-pink-400" />
@@ -946,15 +950,15 @@ export function Pet() {
       )}
 
       {showMiniChat && (
-        <div className="mini-chat-window absolute left-4 right-4 top-4 z-30 rounded-2xl border border-yellow-200/70 bg-[#fff0a8]/95 p-3 shadow-2xl pointer-events-auto">
+        <div className="mini-chat-window absolute left-4 right-4 top-4 z-30 rounded-2xl border border-line bg-surface/95 text-fg p-3 shadow-2xl pointer-events-auto">
           <div className="mb-2 flex items-center justify-between">
-            <div className="text-sm font-semibold text-gray-900">和皮卡丘聊天</div>
-            <button className="text-xs text-gray-500 hover:text-gray-900" onClick={closeMiniChat}>
+            <div className="text-sm font-semibold text-fg">和{petName}聊天</div>
+            <button className="text-xs text-fg-muted hover:text-fg" onClick={closeMiniChat}>
               收起
             </button>
           </div>
-          <div ref={miniChatListRef} className="mini-chat-list h-60 space-y-2 overflow-y-auto rounded-xl bg-[#20180a]/10 p-2">
-            {recentMessages.length === 0 && <div className="text-sm text-gray-500">皮卡~ 直接输入就能聊天。</div>}
+          <div ref={miniChatListRef} className="mini-chat-list h-60 space-y-2 overflow-y-auto rounded-xl bg-app p-2">
+            {recentMessages.length === 0 && <div className="text-sm text-fg-muted">直接输入就能聊天。</div>}
             {recentMessages.map((message) => (
               <div
                 key={message.id}
@@ -964,7 +968,7 @@ export function Pet() {
               >
                 <span
                   className={`inline-block max-w-[85%] rounded-2xl px-3 py-2 ${
-                    message.role === "user" ? "mini-chat-user bg-yellow-400 text-gray-900" : "mini-chat-assistant bg-[#fff8d5] text-gray-800 shadow-sm"
+                    message.role === "user" ? "mini-chat-user bg-primary text-primary-fg" : "mini-chat-assistant bg-surface text-fg shadow-sm"
                   }`}
                 >
                   {message.content.length > 180 ? `${message.content.slice(0, 180)}...` : message.content}
@@ -973,7 +977,7 @@ export function Pet() {
             ))}
             {isStreaming && (
               <div className="text-left text-sm">
-                <span className="mini-chat-assistant inline-block max-w-[85%] rounded-2xl bg-[#fff8d5] px-3 py-2 text-gray-800 shadow-sm">
+                <span className="mini-chat-assistant inline-block max-w-[85%] rounded-2xl bg-surface px-3 py-2 text-fg shadow-sm">
                   {streamText || "皮卡正在思考..."}
                 </span>
               </div>
@@ -981,16 +985,16 @@ export function Pet() {
           </div>
           <div className="mt-2 flex gap-2">
             <input
-              className="mini-chat-input min-w-0 flex-1 rounded-xl border border-yellow-200 bg-[#fff8d5] px-3 py-2 text-sm text-gray-900 outline-none focus:border-yellow-400"
+              className="mini-chat-input min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 py-2 text-sm text-fg outline-none focus:border-primary"
               value={miniInput}
               onChange={(event) => setMiniInput(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") sendMiniMessage();
               }}
-              placeholder="问问皮卡丘..."
+              placeholder={`问问${petName}…`}
             />
             <button
-              className="rounded-xl bg-yellow-400 px-3 py-2 text-sm font-bold text-gray-900 disabled:opacity-50"
+              className="rounded-xl bg-primary px-3 py-2 text-sm font-bold text-primary-fg disabled:opacity-50"
               disabled={!miniInput.trim() || isStreaming}
               onClick={sendMiniMessage}
             >
@@ -1013,16 +1017,18 @@ export function Pet() {
         title="单击互动，拖拽移动，双击聊天"
         style={{ opacity: petOpacity }}
       >
-        {avatar === "toon_pikachu" ? (
-          <Suspense fallback={<div className="h-28 w-28 rounded-full bg-yellow-300/80 shadow-lg" />}>
-            <Pikachu3D state={petState} facing={facing} size={petSize || SPRITE_SIZE} />
+        {avatarInfo.kind === "rigged" && avatarInfo.model ? (
+          <Suspense fallback={<div className="h-28 w-28 rounded-full bg-primary/30 shadow-lg" />}>
+            <RiggedPet3D model={avatarInfo.model} state={petState} facing={facing} size={petSize || SPRITE_SIZE} />
           </Suspense>
         ) : (
-          <PixelPetSprite avatar={avatar} state={petState} facing={facing} size={petSize || SPRITE_SIZE} />
+          <Suspense fallback={<div className="h-28 w-28 rounded-full bg-primary/30 shadow-lg" />}>
+            <Pikachu3D state={petState} facing={facing} size={petSize || SPRITE_SIZE} />
+          </Suspense>
         )}
 
         {statusText && (
-          <div className="absolute -top-8 left-1/2 -translate-x-1/2 rounded-full bg-white/90 px-2.5 py-0.5 text-xs text-gray-700 shadow-sm backdrop-blur pointer-events-none">
+          <div className="absolute -top-8 left-1/2 -translate-x-1/2 rounded-full bg-surface/90 px-2.5 py-0.5 text-xs text-fg-muted shadow-sm backdrop-blur pointer-events-none">
             {statusText}
           </div>
         )}
@@ -1030,7 +1036,7 @@ export function Pet() {
 
       {showMenu && (
         <div
-          className="absolute z-50 min-w-[156px] overflow-y-auto rounded-xl border border-gray-700 bg-gray-900/95 py-1 shadow-2xl backdrop-blur pointer-events-auto"
+          className="absolute z-50 min-w-[156px] overflow-y-auto rounded-xl border border-line bg-surface/95 py-1 shadow-2xl backdrop-blur pointer-events-auto"
           style={{ left: menuLeft, top: menuTop, maxHeight: `calc(100vh - ${menuTop + 8}px)` }}
         >
           <MenuItem label="聊天" onClick={() => { setShowMenu(false); openMiniChat(); }} />
@@ -1049,7 +1055,7 @@ export function Pet() {
           <MenuItem label="今日新闻" onClick={() => { setShowMenu(false); broadcastTodayNews(); }} />
           <MenuItem label="说句话" onClick={() => { setShowMenu(false); triggerRandomInteraction(true); }} />
           <MenuItem label="摸摸头" onClick={() => { setShowMenu(false); speak("皮卡皮卡~ 好舒服，我会更努力陪你。"); }} />
-          <div className="my-1 border-t border-gray-700" />
+          <div className="my-1 border-t border-line" />
           <MenuItem label="设置" onClick={() => { setShowMenu(false); showMainWindow("settings"); }} />
         </div>
       )}
@@ -1064,7 +1070,7 @@ function LifeBar({ label, value, color }: { label: string; value: number; color:
         <span>{label}</span>
         <span>{Math.round(value)}</span>
       </div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-gray-200">
+      <div className="h-1.5 overflow-hidden rounded-full bg-line">
         <div className={`h-full ${color}`} style={{ width: `${Math.max(4, Math.min(100, value))}%` }} />
       </div>
     </div>
@@ -1074,7 +1080,7 @@ function LifeBar({ label, value, color }: { label: string; value: number; color:
 function MenuItem({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
-      className="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-200 transition-colors hover:bg-gray-700/50"
+      className="flex w-full items-center gap-2 px-3 py-2 text-sm text-fg transition-colors hover:bg-surface-2"
       onClick={onClick}
     >
       <span>{label}</span>

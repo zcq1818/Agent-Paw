@@ -3,7 +3,7 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import type { Message } from "./chat";
 import { ACTIVE_BOT_KEY, DEFAULT_BOT_ID } from "../agent/scope";
-import type { PetAvatar, PetSkin } from "./pet";
+import { migrateAvatar, type PetAvatar, type PetSkin } from "./pet";
 
 /**
  * Bot roster — 多 Bot 通讯录的数据地基。
@@ -95,7 +95,7 @@ export const ROLE_PRESETS: Array<{
     role: "chief",
     name: "皮卡丘",
     avatar: "pikachu",
-    petAvatar: "pixel_pikachu",
+    petAvatar: "fox",
     petSkin: "yellow",
     tagline: "默认陪伴型桌宠，负责日常对话与分派",
     instructions: "你是用户的桌面宠物助手，语气轻快、简洁。遇到专业任务时建议用户切换到对应专精 Bot。",
@@ -106,7 +106,7 @@ export const ROLE_PRESETS: Array<{
     role: "coder",
     name: "代码员",
     avatar: "coder",
-    petAvatar: "pixel_dog",
+    petAvatar: "robot",
     petSkin: "blue",
     tagline: "读代码、查问题、准备改动方案",
     instructions: "你是代码审查与实现助手。回答前先确认文件路径与上下文，改动方案要给出具体文件与行。",
@@ -117,7 +117,7 @@ export const ROLE_PRESETS: Array<{
     role: "research",
     name: "资料员",
     avatar: "research",
-    petAvatar: "pixel_cat",
+    petAvatar: "cat",
     petSkin: "green",
     tagline: "检索、核对来源、整理结论",
     instructions: "你是资料研究助手。结论必须标注来源，无法核实的要明确说明，不要猜测。",
@@ -139,7 +139,7 @@ export const ROLE_PRESETS: Array<{
     role: "review",
     name: "复核",
     avatar: "review",
-    petAvatar: "pixel_pikachu",
+    petAvatar: "fox",
     petSkin: "pink",
     tagline: "用不同视角复查另一个 Bot 的结论",
     instructions: "你是复核助手。只检查给定结论中的事实、遗漏与风险，不重复原任务。",
@@ -210,7 +210,8 @@ function loadState() {
   const validBots = bots.filter((bot) => bot && typeof bot.id === "string" && typeof bot.name === "string");
   // 兼容旧数据：早期 Bot 没有 petAvatar，按角色补一个默认形象，避免通讯录还是 emoji。
   const roster = (validBots.length ? validBots : defaultBots()).map((bot) => {
-    if (bot.petAvatar) return bot;
+    const petAvatar = migrateAvatar(bot.petAvatar);
+    if (petAvatar) return petAvatar === bot.petAvatar ? bot : { ...bot, petAvatar };
     const preset = ROLE_PRESETS.find((item) => item.role === bot.role) || ROLE_PRESETS[0];
     return { ...bot, petAvatar: preset.petAvatar, petSkin: bot.petSkin || preset.petSkin };
   });

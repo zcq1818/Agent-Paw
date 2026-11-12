@@ -44,24 +44,24 @@ export function PetBubble({ message, isVisible, onClose, onOpen, autoClose = 500
       onPointerLeave={() => startTimer(Math.min(autoClose, 2400))}
     >
       <div
-        className="speech-window relative rounded-2xl bg-white px-4 py-3 shadow-xl border border-yellow-100 cursor-pointer"
+        className="speech-window relative rounded-2xl border border-line bg-surface px-4 py-3 text-fg shadow-xl cursor-pointer"
         onClick={onOpen}
         title="点击打开聊天"
       >
-        <div className="pet-bubble-markdown max-h-32 overflow-y-auto text-sm text-gray-900 leading-relaxed">
+        <div className="pet-bubble-markdown max-h-32 overflow-y-auto text-sm text-fg leading-relaxed">
           <Suspense fallback={<div className="whitespace-pre-line">{message}</div>}>
             <MarkdownContent content={message} compact />
           </Suspense>
         </div>
         <div className="absolute -bottom-2 left-1/2 -translate-x-1/2">
-          <div className="speech-tail h-4 w-4 rotate-45 border-b border-r border-yellow-100 bg-white" />
+          <div className="speech-tail h-4 w-4 rotate-45 border-b border-r border-line bg-surface" />
         </div>
         <button
           onClick={(event) => {
             event.stopPropagation();
             onClose();
           }}
-          className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-gray-200 text-xs text-gray-600 transition-colors hover:bg-gray-300"
+          className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border border-line bg-surface-2 text-xs text-fg-muted transition-colors hover:text-fg"
           aria-label="关闭气泡"
         >
           x

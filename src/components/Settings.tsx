@@ -59,6 +59,7 @@ import { THEME_OPTIONS, type AppTheme, useThemeClass, useThemeStore } from "../s
 import { useActivityStore } from "../store/activity";
 import { DEFAULT_CHAT_HOTKEY, normalizeHotkey, useShortcutStore } from "../store/shortcut";
 import { CustomSkillsSettings } from "./CustomSkillsSettings";
+import { useAvatarOptions } from "../store/petAvatars";
 
 interface SettingsProps {
   onBack: () => void;
@@ -95,15 +96,10 @@ const ROAM_SCOPE_OPTIONS: { value: RoamScope; label: string }[] = [
   { value: "corner", label: "角落陪伴" },
 ];
 
-const AVATAR_OPTIONS: { value: PetAvatar; label: string; description: string }[] = [
-  { value: "pixel_pikachu", label: "像素皮卡丘", description: "块状复古，更像桌面小伙伴。" },
-  { value: "pixel_cat", label: "像素猫", description: "轻巧、活泼，适合陪伴感。" },
-  { value: "pixel_dog", label: "像素狗", description: "更外向，动作看起来更明显。" },
-  { value: "toon_pikachu", label: "3D 皮卡丘", description: "保留原来的立体模型。" },
-];
 
 export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
   const themeClass = useThemeClass();
+  const avatarOptions = useAvatarOptions();
   const [showCustomSkills, setShowCustomSkills] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSection>("model");
   // 能力开关读全局配置；模型字段读“正在编辑的那套模型”（不能用 loadConfig()，那会带上当前 Bot 的覆盖）。
@@ -724,7 +720,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
               <Card title="形象">
                 <Field label="形态">
                   <div className="grid gap-2 sm:grid-cols-2">
-                    {AVATAR_OPTIONS.map((option) => (
+                    {avatarOptions.map((option) => (
                       <ChoiceCard
                         key={option.value}
                         selected={avatar === option.value}

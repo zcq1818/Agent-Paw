@@ -4,6 +4,7 @@ import { PROVIDER_PRESETS, loadConfig } from "../agent/kernel";
 import type { PetAvatar, PetSkin } from "../store/pet";
 import { useThemeClass } from "../store/theme";
 import { BotAvatar, BotPortrait } from "./BotAvatar";
+import { useAvatarOptions } from "../store/petAvatars";
 import {
   ROLE_PRESETS,
   useBotStore,
@@ -16,13 +17,6 @@ interface BotRosterProps {
   onClose: () => void;
 }
 
-const PET_AVATAR_OPTIONS: { value: PetAvatar | ""; label: string }[] = [
-  { value: "pixel_pikachu", label: "像素皮卡丘" },
-  { value: "pixel_cat", label: "像素猫" },
-  { value: "pixel_dog", label: "像素狗" },
-  { value: "toon_pikachu", label: "3D 皮卡丘" },
-  { value: "", label: "仅 emoji" },
-];
 
 const PET_SKIN_OPTIONS: { value: PetSkin; label: string }[] = [
   { value: "yellow", label: "黄" },
@@ -74,6 +68,7 @@ const EMPTY_DRAFT: Draft = {
 
 /** 团队工作台：多 Bot 通讯录、独立会话线程、审批记录。 */
 export function BotRoster({ onClose }: BotRosterProps) {
+  const avatarOptions = useAvatarOptions();
   const themeClass = useThemeClass();
   const bots = useBotStore((state) => state.bots);
   const approvals = useBotStore((state) => state.approvals);
@@ -243,7 +238,7 @@ export function BotRoster({ onClose }: BotRosterProps) {
                     </div>
                     <div>
                       <div className="font-semibold">Bot 资料</div>
-                      <div className="mt-1 text-xs ui-muted">形象直接复用桌宠精灵</div>
+                      <div className="mt-1 text-xs ui-muted">形象复用桌宠的 3D 形态</div>
                       <div className="mt-2 flex gap-2">
                         <select
                           className="input"
@@ -255,11 +250,12 @@ export function BotRoster({ onClose }: BotRosterProps) {
                             })
                           }
                         >
-                          {PET_AVATAR_OPTIONS.map((option) => (
+                          {avatarOptions.map((option) => (
                             <option key={option.value} value={option.value}>
                               {option.label}
                             </option>
                           ))}
+                          <option value="">仅 emoji</option>
                         </select>
                         <select
                           className="input"

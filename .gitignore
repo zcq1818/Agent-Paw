@@ -26,3 +26,7 @@ Thumbs.db
 *.log
 npm-debug.log*
 pnpm-debug.log*
+
+# 私人定制的桌宠形象（可能来自家人照片），只留在本机
+tools/pets/custom_pets.py
+public/models/pets/custom/
