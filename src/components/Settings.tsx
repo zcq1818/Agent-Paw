@@ -328,10 +328,19 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
     setTestResult(null);
   };
 
+  /** 桌宠设置：本地表单和全局 store 一起更新，改动立即生效并同步到桌宠窗口。 */
+  const live =
+    <T,>(local: (value: T) => void, apply: (value: T) => void) =>
+    (value: T) => {
+      local(value);
+      apply(value);
+    };
+
+  // 底部“保存设置”只用于「AI 能力」和「快捷键」：不再顺带保存模型编辑器里的内容
+  // （之前在桌宠页点保存，会把模型表单也存一遍，编辑中的“新模型”会被重复创建）。
   const saveAll = () => {
-    saveConfig(buildConfig());
-    saveEditingProfile();
-    setName(petNameInput);
+    saveConfig({ enableMemory, enablePersonality, enableSecurity, enableMultimodal });
+    setName(petNameInput.trim() || "皮卡丘");
     setSkin(skin);
     setAvatar(avatar);
     setAutoAction(autoAction);
@@ -711,6 +720,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
 
           {activeSection === "pet" && (
             <>
+              <p className="text-xs text-fg-muted">桌宠设置改动后立即生效。</p>
               <Card title="形象">
                 <Field label="形态">
                   <div className="grid gap-2 sm:grid-cols-2">
@@ -730,7 +740,9 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
                 </Field>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="名字">
-                    <input className="input" value={petNameInput} onChange={(event) => setPetNameInput(event.target.value)} />
+                    <input className="input" value={petNameInput} onChange={(event) => setPetNameInput(event.target.value)}
+                      onBlur={() => setName(petNameInput.trim() || "皮卡丘")}
+                    />
                   </Field>
                   <Field label="配色" hint="皮卡丘系形态生效。">
                     <div className="flex flex-wrap gap-2">
@@ -738,7 +750,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
                         <button
                           key={option.value}
                           type="button"
-                          onClick={() => setSkinLocal(option.value)}
+                          onClick={() => live(setSkinLocal, setSkin)(option.value)}
                           aria-pressed={skin === option.value}
                           className={`flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm transition ${
                             skin === option.value ? "border-primary bg-primary/10 text-fg" : "border-line text-fg-muted hover:text-fg"
@@ -753,7 +765,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label={`大小：${petSize}px`}>
-                    <input type="range" min={96} max={180} step={4} className="w-full" value={petSize} onChange={(event) => setPetSizeLocal(Number(event.target.value))} />
+                    <input type="range" min={96} max={180} step={4} className="w-full" value={petSize} onChange={(event) => live(setPetSizeLocal, setSize)(Number(event.target.value))} />
                   </Field>
                   <Field label={`不透明度：${Math.round(petOpacity * 100)}%`}>
                     <input
@@ -763,7 +775,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
                       step={5}
                       className="w-full"
                       value={Math.round(petOpacity * 100)}
-                      onChange={(event) => setPetOpacityLocal(Number(event.target.value) / 100)}
+                      onChange={(event) => live(setPetOpacityLocal, setOpacity)(Number(event.target.value) / 100)}
                     />
                   </Field>
                 </div>
@@ -771,38 +783,38 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
 
               <Card title="行为">
                 <SettingRow title="活动范围">
-                  <Segmented value={roamScope} options={ROAM_SCOPE_OPTIONS} onChange={setRoamScopeLocal} />
+                  <Segmented value={roamScope} options={ROAM_SCOPE_OPTIONS} onChange={live(setRoamScopeLocal, setRoamScope)} />
                 </SettingRow>
                 <SettingRow title="自动走动" description="空闲时在桌面上溜达、做小动作。">
-                  <Switch label="自动走动" checked={autoAction} onChange={setAutoActionLocal} />
+                  <Switch label="自动走动" checked={autoAction} onChange={live(setAutoActionLocal, setAutoAction)} />
                 </SettingRow>
                 <SettingRow title="避开鼠标" description="走动时躲开你的鼠标。">
-                  <Switch label="避开鼠标" checked={avoidCursor} onChange={setAvoidCursorLocal} />
+                  <Switch label="避开鼠标" checked={avoidCursor} onChange={live(setAvoidCursorLocal, setAvoidCursor)} />
                 </SettingRow>
                 <SettingRow title="主动互动" description="偶尔说句话、讲个笑话。">
-                  <Switch label="主动互动" checked={enableInteractions} onChange={setEnableInteractionsLocal} />
+                  <Switch label="主动互动" checked={enableInteractions} onChange={live(setEnableInteractionsLocal, setEnableInteractions)} />
                 </SettingRow>
                 {enableInteractions && (
                   <SettingRow title="互动频率">
-                    <Segmented value={interactionFrequency} options={FREQUENCY_OPTIONS} onChange={setInteractionFrequencyLocal} />
+                    <Segmented value={interactionFrequency} options={FREQUENCY_OPTIONS} onChange={live(setInteractionFrequencyLocal, setInteractionFrequency)} />
                   </SettingRow>
                 )}
                 <SettingRow title="自主新闻播报" description="每天主动整理一次新闻。">
-                  <Switch label="自主新闻播报" checked={autonomousNews} onChange={setAutonomousNewsLocal} />
+                  <Switch label="自主新闻播报" checked={autonomousNews} onChange={live(setAutonomousNewsLocal, setAutonomousNews)} />
                 </SettingRow>
                 <SettingRow title="自主学习" description="发现重复需求时自动沉淀为技能。">
-                  <Switch label="自主学习" checked={autonomousLearning} onChange={setAutonomousLearningLocal} />
+                  <Switch label="自主学习" checked={autonomousLearning} onChange={live(setAutonomousLearningLocal, setAutonomousLearning)} />
                 </SettingRow>
                 <SettingRow title="安静时段" description="这段时间里宠物不打扰你。">
-                  <Switch label="安静时段" checked={quietHoursEnabled} onChange={setQuietHoursEnabledLocal} />
+                  <Switch label="安静时段" checked={quietHoursEnabled} onChange={live(setQuietHoursEnabledLocal, setQuietHoursEnabled)} />
                 </SettingRow>
                 {quietHoursEnabled && (
                   <div className="grid grid-cols-2 gap-4">
                     <Field label="开始">
-                      <input className="input" type="time" value={quietStart} onChange={(event) => setQuietStartLocal(event.target.value)} />
+                      <input className="input" type="time" value={quietStart} onChange={(event) => live(setQuietStartLocal, setQuietStart)(event.target.value)} />
                     </Field>
                     <Field label="结束">
-                      <input className="input" type="time" value={quietEnd} onChange={(event) => setQuietEndLocal(event.target.value)} />
+                      <input className="input" type="time" value={quietEnd} onChange={(event) => live(setQuietEndLocal, setQuietEnd)(event.target.value)} />
                     </Field>
                   </div>
                 )}
@@ -852,7 +864,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
         </div>
       </div>
 
-      {activeSection !== "model" && activeSection !== "appearance" && (
+      {(activeSection === "features" || activeSection === "shortcuts") && (
         <footer className="flex shrink-0 items-center justify-end gap-3 border-t border-line bg-surface px-4 py-3 sm:px-6">
           {saved && (
             <span className="flex items-center gap-1 text-xs text-success">
