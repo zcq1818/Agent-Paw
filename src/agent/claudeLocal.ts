@@ -25,6 +25,16 @@ interface Tool {
   execute: (args: Record<string, any>) => Promise<string>;
 }
 
+/** 本机智能体：claude = Claude Code，codebuddy = 腾讯 CodeBuddy Code（WorkBuddy 同款引擎）。 */
+export type LocalAgentKind = "claude" | "codebuddy";
+export const CODEBUDDY_LOCAL_PROVIDER = "codebuddy-local";
+
+export function localAgentOf(provider?: string): LocalAgentKind | null {
+  if (provider === CLAUDE_LOCAL_PROVIDER) return "claude";
+  if (provider === CODEBUDDY_LOCAL_PROVIDER) return "codebuddy";
+  return null;
+}
+
 export const CLAUDE_MODEL_OPTIONS = [
   { value: "", label: "跟随 Claude Code 默认" },
   { value: "opus", label: "Opus" },
@@ -32,6 +42,24 @@ export const CLAUDE_MODEL_OPTIONS = [
   { value: "haiku", label: "Haiku" },
   { value: "fable", label: "Fable" },
 ];
+
+/** CodeBuddy Code 2.183 `--help` 里列出的模型（档位 + 常用具体模型）。 */
+export const CODEBUDDY_MODEL_OPTIONS = [
+  { value: "", label: "跟随 CodeBuddy 默认" },
+  { value: "fast-model", label: "快速档" },
+  { value: "balanced-model", label: "均衡档" },
+  { value: "primary-model", label: "主力档" },
+  { value: "deep-model", label: "深度思考档" },
+  { value: "hy3", label: "混元 hy3" },
+  { value: "deepseek-v4.1-flash", label: "DeepSeek v4.1 Flash" },
+  { value: "glm-5.3", label: "GLM 5.3" },
+  { value: "kimi-k3", label: "Kimi K3" },
+];
+
+export const LOCAL_AGENT_LABELS: Record<LocalAgentKind, string> = {
+  claude: "Claude",
+  codebuddy: "CodeBuddy",
+};
 
 const SESSIONS_KEY = "paw_claude_sessions";
 
@@ -83,18 +111,27 @@ export interface ClaudeRunOptions {
   model?: string;
   readOnlyBuiltins?: boolean;
   path?: string;
+  agent?: LocalAgentKind;
   onChunk: (text: string) => void;
   onToolEvent?: (event: ToolEvent) => void;
   executeTool: (tool: Tool | undefined, name: string, args: Record<string, unknown>) => Promise<{ result: string; ok: boolean }>;
   signal?: AbortSignal;
 }
 
-const LOGIN_HINT =
-  "本机 Claude 的登录已过期或还没登录。请在终端运行 `claude`，按提示用 `/login` 重新登录你的 Claude 账号（登录在 Claude Code 自己的页面完成，桌宠不经手），然后再试。";
+const LOGIN_HINTS: Record<LocalAgentKind, string> = {
+  claude:
+    "本机 Claude 的登录已过期或还没登录。请在终端运行 `claude`，按提示用 `/login` 重新登录你的 Claude 账号（登录在 Claude Code 自己的页面完成，桌宠不经手），然后再试。",
+  codebuddy:
+    "本机 CodeBuddy 还没登录。请在终端运行 `codebuddy`，按提示用 `/login` 登录你的 CodeBuddy 账号（登录在 CodeBuddy 自己的页面完成，桌宠不经手），然后再试。",
+};
 
-function friendlyError(text: string) {
-  if (/Failed to authenticate|OAuth|not logged in|Invalid API key|\/login|log in/i.test(text)) return LOGIN_HINT;
-  if (/usage limit|rate limit|limit reached/i.test(text)) return `Claude 的用量额度暂时用完了：${text.slice(0, 200)}`;
+function friendlyError(text: string, agent: LocalAgentKind) {
+  if (/Failed to authenticate|OAuth|not logged in|Authentication required|Invalid API key|\/login|log in|sign in/i.test(text)) {
+    return LOGIN_HINTS[agent];
+  }
+  if (/usage limit|rate limit|limit reached|quota|额度/i.test(text)) {
+    return `${LOCAL_AGENT_LABELS[agent]} 的用量额度暂时用完了：${text.slice(0, 200)}`;
+  }
   return text.slice(0, 400);
 }
 
@@ -109,7 +146,10 @@ export async function runClaudeLocal(options: ClaudeRunOptions): Promise<string>
 
   // 判断能否接着上一个 session
   const previousReply = [...options.history.slice(0, -1)].reverse().find((m) => m.role === "assistant")?.content || "";
-  const record = options.conversationKey ? loadSessions()[options.conversationKey] : undefined;
+  const agent: LocalAgentKind = options.agent || "claude";
+  // 同一个对话换了智能体（Claude ↔ CodeBuddy）时不能互相 --resume，按智能体分开记
+  const sessionKey = options.conversationKey ? `${agent}:${options.conversationKey}` : "";
+  const record = sessionKey ? loadSessions()[sessionKey] : undefined;
   const canResume = Boolean(record && previousReply && record.lastReply === fingerprint(previousReply));
   const earlier = options.history.slice(0, -1);
   const prompt =
@@ -121,6 +161,7 @@ export async function runClaudeLocal(options: ClaudeRunOptions): Promise<string>
   let sessionId = canResume ? record!.sessionId : "";
   let resultText = "";
   let errorText = "";
+  let lastAssistantText = "";
   let sawDelta = false;
   let blockHasText = false;
   const unlisteners: Array<() => void> = [];
@@ -162,14 +203,20 @@ export async function runClaudeLocal(options: ClaudeRunOptions): Promise<string>
           sawDelta = true;
           append(ev.delta.text || "");
         }
-      } else if (data.type === "assistant" && !sawDelta) {
-        // 没有逐字输出时（例如出错的合成消息），用整条消息兜底
+      } else if (data.type === "assistant") {
         const parts = (data.message?.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text);
-        if (parts.length && data.message?.model !== "<synthetic>") append((text ? "\n\n" : "") + parts.join(""));
+        if (parts.length) lastAssistantText = parts.join("");
+        // 没有逐字输出时用整条消息兜底；出错时的合成消息只用来报错，不当作回复
+        if (!sawDelta && parts.length && data.message?.model !== "<synthetic>") append((text ? "\n\n" : "") + parts.join(""));
       } else if (data.type === "result") {
         resultText = typeof data.result === "string" ? data.result : "";
         if (data.is_error || (data.subtype && data.subtype !== "success")) {
-          errorText = resultText || (Array.isArray(data.errors) ? data.errors.join("；") : "") || data.subtype || "未知错误";
+          errorText =
+            resultText ||
+            lastAssistantText ||
+            (Array.isArray(data.errors) ? data.errors.join("；") : "") ||
+            data.subtype ||
+            "未知错误";
         }
       }
     })
@@ -218,16 +265,19 @@ export async function runClaudeLocal(options: ClaudeRunOptions): Promise<string>
         readOnlyBuiltins: Boolean(options.readOnlyBuiltins),
         tools: mcpTools,
         path: options.path || null,
+        agent,
       },
     });
     const end = await finished;
     if (options.signal?.aborted) throw new DOMException("生成已停止", "AbortError");
-    if (errorText) throw new Error(friendlyError(errorText));
+    if (errorText) throw new Error(friendlyError(errorText, agent));
     if (!text.trim() && resultText) append(resultText);
     if (!text.trim()) {
-      throw new Error(friendlyError(end.stderr || `Claude Code 没有返回内容（退出码 ${end.code ?? "未知"}）`));
+      throw new Error(
+        friendlyError(end.stderr || `${LOCAL_AGENT_LABELS[agent]} 没有返回内容（退出码 ${end.code ?? "未知"}）`, agent)
+      );
     }
-    if (sessionId && options.conversationKey) saveSession(options.conversationKey, { sessionId, lastReply: fingerprint(text), updatedAt: Date.now() });
+    if (sessionId && sessionKey) saveSession(sessionKey, { sessionId, lastReply: fingerprint(text), updatedAt: Date.now() });
     return text;
   } finally {
     options.signal?.removeEventListener("abort", onAbort);
@@ -239,7 +289,7 @@ export async function runClaudeLocal(options: ClaudeRunOptions): Promise<string>
 export async function askClaudeLocal(
   system: string,
   prompt: string,
-  options: { model?: string; path?: string; signal?: AbortSignal } = {}
+  options: { model?: string; path?: string; signal?: AbortSignal; agent?: LocalAgentKind } = {}
 ): Promise<string> {
   return runClaudeLocal({
     conversationKey: "",
@@ -249,14 +299,21 @@ export async function askClaudeLocal(
     tools: [],
     model: options.model,
     path: options.path,
+    agent: options.agent,
     signal: options.signal,
     onChunk: () => {},
     executeTool: async () => ({ result: "没有可用工具", ok: false }),
   });
 }
 
-export const CLAUDE_LOCAL_PROMPT = [
-  "## 运行环境",
-  "你通过用户本机的 Claude Code 运行。桌宠的工具都在 MCP 服务 paw 里（名字形如 mcp__paw__add_todo），按工具说明直接调用；需要用户确认的操作会自动弹出确认卡片，被拒绝就停止并说明。",
-  "不要提及 Claude Code 的命令行、斜杠命令或工作目录，你是用户的桌面宠物助手。",
-].join("\n");
+export function localAgentPrompt(agent: LocalAgentKind) {
+  const product = agent === "codebuddy" ? "CodeBuddy Code" : "Claude Code";
+  return [
+    "## 运行环境",
+    `你通过用户本机的 ${product} 运行。桌宠的工具都在 MCP 服务 paw 里（名字形如 mcp__paw__add_todo），按工具说明直接调用；需要用户确认的操作会自动弹出确认卡片，被拒绝就停止并说明。`,
+    `不要提及 ${product} 的命令行、斜杠命令或工作目录，你是用户的桌面宠物助手。`,
+  ].join("\n");
+}
+
+/** 兼容旧引用 */
+export const CLAUDE_LOCAL_PROMPT = localAgentPrompt("claude");

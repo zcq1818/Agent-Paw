@@ -62,7 +62,7 @@ import { CustomSkillsSettings } from "./CustomSkillsSettings";
 import { InitiativeCard, TimelineOptions } from "./AssistantSettings";
 import { useAvatarOptions } from "../store/petAvatars";
 import type { ComputerControlMode } from "../agent/computer";
-import { CLAUDE_LOCAL_PROVIDER, CLAUDE_MODEL_OPTIONS } from "../agent/claudeLocal";
+import { CLAUDE_MODEL_OPTIONS, CODEBUDDY_MODEL_OPTIONS, LOCAL_AGENT_LABELS, localAgentOf } from "../agent/claudeLocal";
 
 interface SettingsProps {
   onBack: () => void;
@@ -219,7 +219,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
   const [activitySummary, setActivitySummary] = useState<string | null>(null);
 
   const activePreset = useMemo(() => getProviderPreset(provider), [provider]);
-  const isClaudeLocal = provider === CLAUDE_LOCAL_PROVIDER;
+  const localAgent = localAgentOf(provider);
 
   const buildConfig = (): Partial<AgentConfig> => ({
     provider,
@@ -545,11 +545,14 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
                   </Field>
                 )}
 
-                {isClaudeLocal ? (
+                {localAgent ? (
                   <>
-                    <Field label="模型" hint="Opus 能力最强，Sonnet 更快，Haiku 最省用量。">
+                    <Field
+                      label="模型"
+                      hint={localAgent === "claude" ? "Opus 能力最强，Sonnet 更快，Haiku 最省用量。" : "档位由 CodeBuddy 自动选具体模型；也可以指定某个模型。"}
+                    >
                       <select className="input" value={model} onChange={(event) => setModel(event.target.value)}>
-                        {CLAUDE_MODEL_OPTIONS.map((option) => (
+                        {(localAgent === "claude" ? CLAUDE_MODEL_OPTIONS : CODEBUDDY_MODEL_OPTIONS).map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>
@@ -557,13 +560,17 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
                       </select>
                     </Field>
                     <SettingRow
-                      title="允许 Claude 自带的只读工具"
+                      title={`允许 ${LOCAL_AGENT_LABELS[localAgent]} 自带的只读工具`}
                       description="读文件、搜索文件、联网搜索和抓取网页。命令行和改文件仍然只能通过桌宠的电脑控制，按审批规则确认。"
                     >
-                      <Switch label="允许 Claude 自带的只读工具" checked={claudeReadOnlyBuiltins} onChange={setClaudeReadOnlyBuiltins} />
+                      <Switch
+                        label={`允许 ${LOCAL_AGENT_LABELS[localAgent]} 自带的只读工具`}
+                        checked={claudeReadOnlyBuiltins}
+                        onChange={setClaudeReadOnlyBuiltins}
+                      />
                     </SettingRow>
                     <p className="text-xs leading-relaxed text-fg-muted">
-                      桌宠的工具（电脑控制、待办日程、活动时间线、自动任务等）全部可用。用量算在你自己的 Claude 订阅里；为了不额外消耗，记忆整理、剪贴板分析这类后台任务不会调用 Claude。
+                      桌宠的工具（电脑控制、待办日程、活动时间线、自动任务等）全部可用。用量算在你自己的 {LOCAL_AGENT_LABELS[localAgent]} 账号里；为了不额外消耗，记忆整理、剪贴板分析这类后台任务不会调用它。
                     </p>
                   </>
                 ) : (

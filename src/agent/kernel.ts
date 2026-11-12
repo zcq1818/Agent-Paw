@@ -4,8 +4,10 @@ import { getAllTools, todoStore, calendarStore } from "./tools";
 import { getMultimodalTools } from "./multimodal";
 import { computerControlPrompt, getComputerTools, type ComputerControlMode } from "./computer";
 import { getTimelineTools, TIMELINE_PROMPT, timelineEnabled } from "./timeline";
-import { CLAUDE_LOCAL_PROVIDER } from "./claudeLocal";
+import { CLAUDE_LOCAL_PROVIDER, CODEBUDDY_LOCAL_PROVIDER, localAgentOf } from "./claudeLocal";
+import { invoke } from "@tauri-apps/api/core";
 import { getAutomationTools } from "./automations";
+import { getHandoffTools } from "./handoff";
 import { personalityStore } from "./personality";
 import { securityManager } from "./security";
 import { getSkillsContext } from "./customSkills";
@@ -116,6 +118,18 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     maxTokens: 8192,
     notes:
       "使用你电脑上安装的官方 Claude Code 和你自己登录的 Claude 账号，不需要 API Key。桌宠不经手账号凭据；登录过期时在终端运行 claude 并用 /login 重新登录。",
+  },
+  {
+    id: "codebuddy-local",
+    label: "本机 CodeBuddy（WorkBuddy 同款引擎）",
+    baseUrl: "",
+    model: "",
+    stream: true,
+    enableTools: true,
+    temperature: 0.7,
+    maxTokens: 8192,
+    notes:
+      "使用腾讯官方的 CodeBuddy Code 命令行（npm 包 @tencent-ai/codebuddy-code）和你自己登录的 CodeBuddy 账号，不需要 API Key。桌宠不经手账号凭据；没登录时在终端运行 codebuddy 并用 /login 登录。",
   },
   {
     id: "xfyun-spark",
@@ -367,6 +381,13 @@ export function getEmbeddingModel(config = loadConfig()): string {
 
 export async function testConnection(configOverride?: Partial<AgentConfig>): Promise<string> {
   const config = normalizeConfig({ ...loadConfig(), ...configOverride });
+  if (config.provider === CODEBUDDY_LOCAL_PROVIDER) {
+    const { askClaudeLocal } = await import("./claudeLocal");
+    const status = await invoke<{ available: boolean; version: string; path: string; detail: string }>("check_codebuddy", { path: null });
+    if (!status.available) throw new Error(status.detail || "没有找到 CodeBuddy Code");
+    const reply = await askClaudeLocal("你是连接测试。", "只回复 OK 两个字母。", { model: config.model, agent: "codebuddy" });
+    return `${status.version}：${reply.trim().slice(0, 40)}`;
+  }
   if (config.provider === CLAUDE_LOCAL_PROVIDER) {
     const { askClaudeLocal } = await import("./claudeLocal");
     const { checkLocalClaude } = await import("./localClaude");
@@ -678,7 +699,7 @@ const baseTools: Tool[] = [
 
 export function getTools(): Tool[] {
   const config = loadConfig();
-  const tools: Tool[] = [...baseTools, ...getAllTools()];
+  const tools: Tool[] = [...baseTools, ...getAllTools(), ...getHandoffTools()];
   if (config.enableMultimodal !== false) {
     tools.push(...getMultimodalTools());
   }
@@ -755,8 +776,9 @@ export async function streamChat(
   options: { signal?: AbortSignal; onToolEvent?: (event: ToolEvent) => void } = {}
 ): Promise<string> {
   const config = loadConfig();
-  const claudeLocal = config.provider === CLAUDE_LOCAL_PROVIDER;
-  if (!config.apiKey && !claudeLocal) throw new Error("请先在设置中配置 API Key");
+  // 本机智能体（Claude Code / CodeBuddy Code）用用户自己登录的账号，不需要 API Key
+  const localAgent = localAgentOf(config.provider);
+  if (!config.apiKey && !localAgent) throw new Error("请先在设置中配置 API Key");
 
   const userText = request.userMessage;
   if (config.enableSecurity !== false) {
@@ -793,17 +815,18 @@ export async function streamChat(
 
   const tools = getTools();
 
-  if (claudeLocal) {
-    const { runClaudeLocal, CLAUDE_LOCAL_PROMPT } = await import("./claudeLocal");
+  if (localAgent) {
+    const { runClaudeLocal, localAgentPrompt } = await import("./claudeLocal");
     const { useChatStore } = await import("../store/chat");
     const conversationKey = `${useBotStore.getState().activeBotId || "default"}:${useChatStore.getState().activeConversationId}`;
     return runClaudeLocal({
       conversationKey,
-      systemPrompt: `${systemPrompt}\n\n${CLAUDE_LOCAL_PROMPT}`,
+      systemPrompt: `${systemPrompt}\n\n${localAgentPrompt(localAgent)}`,
       history: request.messages,
       userText,
       tools,
       model: config.model,
+      agent: localAgent,
       readOnlyBuiltins: config.claudeReadOnlyBuiltins === true,
       onChunk,
       onToolEvent: options.onToolEvent,
