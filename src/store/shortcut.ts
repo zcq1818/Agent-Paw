@@ -3,12 +3,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { isRegistered, register, unregister } from "@tauri-apps/plugin-global-shortcut";
 import { create } from "zustand";
 
-const CHAT_HOTKEY_KEY = "paw_chat_hotkey";
+export const CHAT_HOTKEY_KEY = "paw_chat_hotkey";
 export const DEFAULT_CHAT_HOTKEY = "CommandOrControl+Shift+P";
 
 interface ShortcutState {
   chatHotkey: string;
   setChatHotkey: (shortcut: string) => void;
+  /** 热键只在宠物窗口注册；设置页（工作台窗口）保存后靠它通知宠物窗口重新注册。 */
+  syncFromStorage: () => void;
 }
 
 function loadChatHotkey() {
@@ -31,6 +33,7 @@ export const useShortcutStore = create<ShortcutState>((set) => ({
     localStorage.setItem(CHAT_HOTKEY_KEY, normalized);
     set({ chatHotkey: normalized });
   },
+  syncFromStorage: () => set({ chatHotkey: loadChatHotkey() }),
 }));
 
 export function useChatHotkeyRegistration(enabled: boolean) {

@@ -226,7 +226,7 @@ class CustomSkillsStore {
           const key = line.slice(0, idx).trim();
           let value = line.slice(idx + 1).trim();
           if (value.startsWith('"') && value.endsWith('"')) {
-            value = value.slice(1, -1).replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+            value = value.slice(1, -1).replace(/\\(["\\n])/g, (_, ch: string) => (ch === "n" ? "\n" : ch));
           }
           frontmatter[key] = value;
         });
@@ -254,6 +254,10 @@ class CustomSkillsStore {
           });
       }
       instructionBody = instructionBody.replace(/^#\s+.*\n/, "").trim();
+      const exportedDescription = frontmatter.description?.trim();
+      if (exportedDescription && instructionBody.startsWith(exportedDescription)) {
+        instructionBody = instructionBody.slice(exportedDescription.length).trim();
+      }
 
       const name = frontmatter.name || /^#\s+(.+)$/m.exec(text)?.[1]?.trim() || "";
       if (!name) return undefined;

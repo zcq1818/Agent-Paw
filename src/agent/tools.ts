@@ -62,7 +62,7 @@ function writeJson(key: string, value: unknown) {
  * 外部动作确认：走内联审批卡片，替代原来的 window.confirm 弹窗。
  * 卡片由 ApprovalOverlay 渲染；无人应答时 120 秒后自动拒绝，避免工具调用被永久挂住。
  */
-function confirmSystemAction(message: string, kind: ApprovalKind = "shell"): Promise<boolean> {
+export function confirmSystemAction(message: string, kind: ApprovalKind = "shell"): Promise<boolean> {
   if (typeof window === "undefined") return Promise.resolve(true);
 
   const store = useBotStore.getState();
@@ -116,11 +116,16 @@ function confirmSystemAction(message: string, kind: ApprovalKind = "shell"): Pro
 class TodoStore {
   private todos: Todo[] = readJson<Todo[]>(TODO_KEY, []);
 
+  private load() {
+    this.todos = readJson<Todo[]>(TODO_KEY, []);
+  }
+
   private save() {
     writeJson(TODO_KEY, this.todos);
   }
 
   add(text: string, priority: "high" | "medium" | "low" = "medium", dueDate?: string): Todo {
+    this.load();
     const now = new Date().toISOString();
     const todo: Todo = {
       id: `todo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -137,6 +142,7 @@ class TodoStore {
   }
 
   toggle(id: string): Todo | undefined {
+    this.load();
     const todo = this.todos.find((item) => item.id === id);
     if (!todo) return undefined;
     todo.completed = !todo.completed;
@@ -146,6 +152,7 @@ class TodoStore {
   }
 
   delete(id: string): boolean {
+    this.load();
     const before = this.todos.length;
     this.todos = this.todos.filter((item) => item.id !== id);
     this.save();
@@ -153,6 +160,7 @@ class TodoStore {
   }
 
   update(id: string, updates: Partial<Omit<Todo, "id" | "createdAt">>): Todo | undefined {
+    this.load();
     const todo = this.todos.find((item) => item.id === id);
     if (!todo) return undefined;
     Object.assign(todo, updates, { updatedAt: new Date().toISOString() });
@@ -161,6 +169,7 @@ class TodoStore {
   }
 
   getStats() {
+    this.load();
     const now = new Date();
     return {
       total: this.todos.length,
@@ -175,6 +184,7 @@ class TodoStore {
   }
 
   getUpcoming(limit = 5): Todo[] {
+    this.load();
     return this.todos
       .filter((todo) => !todo.completed && todo.dueDate)
       .sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime())
@@ -182,6 +192,7 @@ class TodoStore {
   }
 
   getAll(): Todo[] {
+    this.load();
     return [...this.todos];
   }
 }
@@ -189,11 +200,16 @@ class TodoStore {
 class CalendarStore {
   private events: CalendarEvent[] = readJson<CalendarEvent[]>(CALENDAR_KEY, []);
 
+  private load() {
+    this.events = readJson<CalendarEvent[]>(CALENDAR_KEY, []);
+  }
+
   private save() {
     writeJson(CALENDAR_KEY, this.events);
   }
 
   add(title: string, startTime: string, endTime?: string, description?: string, location?: string): CalendarEvent {
+    this.load();
     const event: CalendarEvent = {
       id: `event_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       title,
@@ -210,6 +226,7 @@ class CalendarStore {
   }
 
   delete(id: string): boolean {
+    this.load();
     const before = this.events.length;
     this.events = this.events.filter((event) => event.id !== id);
     this.save();
@@ -217,11 +234,13 @@ class CalendarStore {
   }
 
   getUpcoming(limit = 5): CalendarEvent[] {
+    this.load();
     const now = new Date();
     return this.events.filter((event) => new Date(event.startTime) >= now).slice(0, limit);
   }
 
   getAll(): CalendarEvent[] {
+    this.load();
     return [...this.events];
   }
 }
@@ -242,6 +261,7 @@ class ShortcutStore {
   }
 
   add(name: string, command: string, description = "", icon = "link") {
+    this.shortcuts = readJson(SHORTCUT_KEY, []);
     const shortcut = {
       id: `shortcut_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       name,
@@ -256,6 +276,7 @@ class ShortcutStore {
   }
 
   delete(id: string): boolean {
+    this.shortcuts = readJson(SHORTCUT_KEY, []);
     const before = this.shortcuts.length;
     this.shortcuts = this.shortcuts.filter((item) => item.id !== id);
     this.save();
@@ -263,6 +284,7 @@ class ShortcutStore {
   }
 
   getAll() {
+    this.shortcuts = readJson(SHORTCUT_KEY, this.shortcuts);
     return [...this.shortcuts];
   }
 }
@@ -320,8 +342,12 @@ const todoTools: Tool[] = [
       required: ["text"],
     },
     execute: async (args) => {
-      const keyword = String(args.text || "").toLowerCase();
-      const todo = todoStore.getAll().find((item) => item.text.toLowerCase().includes(keyword));
+      const keyword = String(args.text || "").trim().toLowerCase();
+      if (!keyword) return "请提供待办关键词";
+      const all = todoStore.getAll();
+      const todo =
+        all.find((item) => !item.completed && item.text.toLowerCase().includes(keyword)) ||
+        all.find((item) => item.text.toLowerCase().includes(keyword));
       if (!todo) return "未找到该待办事项";
       const updated = todoStore.update(todo.id, { completed: true });
       return `已完成：${updated?.text}`;
@@ -338,7 +364,8 @@ const todoTools: Tool[] = [
       required: ["text"],
     },
     execute: async (args) => {
-      const keyword = String(args.text || "").toLowerCase();
+      const keyword = String(args.text || "").trim().toLowerCase();
+      if (!keyword) return "请提供待办关键词";
       const todo = todoStore.getAll().find((item) => item.text.toLowerCase().includes(keyword));
       if (!todo) return "未找到该待办事项";
       todoStore.delete(todo.id);
@@ -388,7 +415,8 @@ const calendarTools: Tool[] = [
       required: ["title"],
     },
     execute: async (args) => {
-      const keyword = String(args.title || "").toLowerCase();
+      const keyword = String(args.title || "").trim().toLowerCase();
+      if (!keyword) return "请提供日程标题关键词";
       const event = calendarStore.getAll().find((item) => item.title.toLowerCase().includes(keyword));
       if (!event) return "未找到该日程";
       calendarStore.delete(event.id);
@@ -419,9 +447,13 @@ const shortcutTools: Tool[] = [
       required: ["name"],
     },
     execute: async (args) => {
-      const keyword = String(args.name || "").toLowerCase();
+      const keyword = String(args.name || "").trim().toLowerCase();
+      if (!keyword) return "请提供快捷命令名称";
       const shortcut = shortcutStore.getAll().find((item) => item.name.toLowerCase().includes(keyword));
       if (!shortcut) return "未找到该快捷命令";
+      if (!(await confirmSystemAction(`皮卡准备执行快捷命令「${shortcut.name}」：${shortcut.command}`, "network"))) {
+        return "已取消执行快捷命令。";
+      }
       await open(shortcut.command);
       return `正在执行：${shortcut.name}`;
     },

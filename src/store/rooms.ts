@@ -127,6 +127,7 @@ export const useRoomStore = create<RoomState>((set, get) => {
     },
 
     appendMessage: (msg) => {
+      if (!get().rooms.some((room) => room.id === msg.roomId)) return "";
       const message: RoomMessage = {
         ...msg,
         id: uid("rmsg"),

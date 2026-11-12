@@ -62,7 +62,11 @@ interface ActivityState {
   getSummary: (dateStr?: string) => string;
   getBehaviorReport: (dateStr?: string) => string;
   clear: () => void;
+  /** 另一个窗口改了开关或记录：重新载入。 */
+  syncFromStorage: (key: string | null) => void;
 }
+
+export const ACTIVITY_STORAGE_KEYS = ["paw_activity_enabled", "paw_activity_entries", "paw_typing_samples"];
 
 const ENABLED_KEY = "paw_activity_enabled";
 const ENTRIES_KEY = "paw_activity_entries";
@@ -347,6 +351,22 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     localStorage.removeItem(TYPING_KEY);
     set({ entries: [], typingSamples: [], current: undefined });
   },
+
+  syncFromStorage: (key) => {
+    if (key === null || key === ENABLED_KEY) {
+      const enabled = loadEnabled();
+      // 关闭观察时丢弃正在计时的条目，避免关闭后还继续记录。
+      set(enabled ? { enabled } : { enabled, current: undefined });
+    }
+    if (key === null || key === ENTRIES_KEY) {
+      const entries = readJson<ActivityEntry[]>(ENTRIES_KEY, []);
+      // 记录被另一个窗口清空时，正在计时的条目也一起作废。
+      set(entries.length === 0 ? { entries, current: undefined } : { entries });
+    }
+    if (key === null || key === TYPING_KEY) {
+      set({ typingSamples: readJson<TypingSample[]>(TYPING_KEY, []) });
+    }
+  },
 }));
 
 export function useActivityMonitor(onInsight?: (summary: string) => void) {
@@ -402,10 +422,12 @@ export function checkAndDeliverYesterdaySummary(
   if (!hasYesterdayData) return;
 
   // Generate summary for yesterday's data
+  const stats = store.getStats(yesterdayStr);
+  if (stats.totalActiveMs === 0 && stats.typing.chars === 0) return;
   const summary = getSummary(yesterdayStr);
-  if (!summary || summary.includes("暂无足够活动记录")) return;
+  if (!summary) return;
 
-  addMessage({ role: "assistant", content: `## 昨日电脑活动回顾\n\n${summary.replace("今日电脑活动分析", "昨日电脑活动回顾")}` });
+  addMessage({ role: "assistant", content: summary.replace("## 今日电脑活动分析", "## 昨日电脑活动回顾") });
   speak("我整理了一下你昨天的电脑活动，已经放到聊天里了。", 5200);
   localStorage.setItem(todayKey, "1");
 }

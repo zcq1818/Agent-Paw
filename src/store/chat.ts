@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { SurfaceSpec } from "../agent/surfaces";
-import { scopeKey } from "../agent/scope";
+import { getActiveBotId, scopeKey, scopeKeyFor } from "../agent/scope";
 import type { ToolRun } from "../agent/toolEvents";
 
 export type Message = {
@@ -12,6 +12,8 @@ export type Message = {
   /** 这条回复期间发生的结构化工具调用。 */
   toolRuns?: ToolRun[];
 };
+
+export type ChatTarget = { botId: string; conversationId: string };
 
 export type Conversation = {
   id: string;
@@ -26,6 +28,11 @@ interface ChatState {
   activeConversationId: string;
   messages: Message[];
   addMessage: (msg: Omit<Message, "id" | "createdAt">) => void;
+  /**
+   * 把消息写进指定 Bot 的指定会话。回复生成期间用户可能切换了 Bot 或会话，
+   * 回复必须落回发起时的那个会话，而不是“当前打开的”会话。
+   */
+  addMessageTo: (target: ChatTarget, msg: Omit<Message, "id" | "createdAt">) => void;
   updateLastAssistant: (content: string) => void;
   removeMessage: (id: string) => void;
   removeLastAssistant: () => void;
@@ -36,6 +43,14 @@ interface ChatState {
   deleteConversation: (id: string) => void;
   /** 切换 Bot 后重新载入该 Bot 的会话分区。 */
   hydrateForBot: () => void;
+  /** 另一个窗口写入了会话数据：重新载入，但尽量保持本窗口当前打开的会话。 */
+  syncFromStorage: () => void;
+}
+
+/** 当前 Bot 分区下会话相关的 localStorage key，供跨窗口同步判断。 */
+export function chatStorageKeys(): string[] {
+  const keys = getKeys();
+  return [keys.storage, keys.active];
 }
 
 const LEGACY_KEY = "paw_messages";
@@ -153,6 +168,47 @@ export const useChatStore = create<ChatState>((set, get) => ({
     );
   },
 
+  addMessageTo: (target, msg) => {
+    const newMsg: Message = {
+      ...msg,
+      id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: nowIso(),
+    };
+    const append = (conversation: Conversation): Conversation => ({
+      ...conversation,
+      messages: [...conversation.messages, newMsg],
+      updatedAt: nowIso(),
+    });
+
+    if (target.botId === getActiveBotId()) {
+      const state = get();
+      if (!state.conversations.some((conversation) => conversation.id === target.conversationId)) {
+        // 会话已被删除：退回到当前会话，避免回复丢失。
+        get().addMessage(msg);
+        return;
+      }
+      const conversations = state.conversations.map((conversation) =>
+        conversation.id === target.conversationId ? append(conversation) : conversation
+      );
+      saveConversations(conversations, state.activeConversationId);
+      const active = conversations.find((conversation) => conversation.id === state.activeConversationId);
+      set({ conversations, messages: active?.messages || [] });
+      return;
+    }
+
+    // 发起时的 Bot 已不是当前 Bot：直接写进它自己的存储分区，不打扰当前界面。
+    try {
+      const storageKey = scopeKeyFor(STORAGE_KEY, target.botId);
+      const parsed = JSON.parse(localStorage.getItem(storageKey) || "[]") as Conversation[];
+      if (!Array.isArray(parsed)) return;
+      const exists = parsed.some((conversation) => conversation.id === target.conversationId);
+      const conversations = exists
+        ? parsed.map((conversation) => (conversation.id === target.conversationId ? append(conversation) : conversation))
+        : [append({ ...createEmptyConversation("后台回复"), id: target.conversationId }), ...parsed];
+      localStorage.setItem(storageKey, JSON.stringify(conversations));
+    } catch {}
+  },
+
   updateLastAssistant: (content) => {
     set((state) =>
       withActiveConversation(state, (conversation) => {
@@ -240,4 +296,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   hydrateForBot: () => set(loadState()),
+
+  syncFromStorage: () => {
+    const loaded = loadState();
+    const currentId = get().activeConversationId;
+    const keep = loaded.conversations.find((conversation) => conversation.id === currentId);
+    set(
+      keep
+        ? { conversations: loaded.conversations, activeConversationId: keep.id, messages: keep.messages || [] }
+        : loaded
+    );
+  },
 }));

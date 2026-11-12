@@ -5,6 +5,7 @@ import { useChatHotkeyRegistration } from "./store/shortcut";
 import { useBotRosterSync } from "./store/bots";
 import { ApprovalOverlay } from "./components/ApprovalOverlay";
 import { useBotScopeSync } from "./agent/botScopeSync";
+import { useCrossWindowSync } from "./store/windowSync";
 
 type MainView = "chat" | "settings";
 
@@ -16,52 +17,66 @@ function LoadingShell() {
   return <div className="chat-window flex h-screen w-screen items-center justify-center text-sm text-gray-400">Loading...</div>;
 }
 
-export default function App() {
-  const [windowLabel, setWindowLabel] = useState<string | null>(null);
-  const [mainView, setMainView] = useState<MainView>("chat");
+function resolveWindowLabel(): string {
+  try {
+    return getCurrentWindow().label;
+  } catch {
+    // 浏览器 dev 预览没有 Tauri 运行时；?window=main 可直接查看工作台。
+    const forced = new URLSearchParams(window.location.search).get("window");
+    return forced === "main" ? "main" : "pet";
+  }
+}
 
-  useEffect(() => {
-    try {
-      setWindowLabel(getCurrentWindow().label);
-    } catch {
-      // 浏览器 dev 预览没有 Tauri 运行时；?window=main 可直接查看工作台。
-      const forced = new URLSearchParams(window.location.search).get("window");
-      setWindowLabel(forced === "main" ? "main" : "pet");
-    }
-  }, []);
+export default function App() {
+  const [windowLabel] = useState<string>(resolveWindowLabel);
+  const [mainView, setMainView] = useState<MainView>("chat");
 
   useChatHotkeyRegistration(windowLabel === "pet");
   useBotRosterSync();
   useBotScopeSync();
+  useCrossWindowSync();
 
   useEffect(() => {
     if (windowLabel !== "main") return;
 
+    let disposed = false;
     const unlisteners: (() => void)[] = [];
+    const track = (promise: Promise<() => void>) =>
+      promise
+        .then((fn) => (disposed ? fn() : unlisteners.push(fn)))
+        .catch(() => {});
 
-    async function setupListeners() {
-      const unlistenChat = await listen("open-chat", () => setMainView("chat"));
-      const unlistenSettings = await listen("open-settings", () => setMainView("settings"));
-      const unlistenClose = await getCurrentWindow().onCloseRequested(async (event) => {
-        event.preventDefault();
-        try {
-          await getCurrentWindow().hide();
-        } catch {
-          // Browser dev fallback.
-        }
-      });
-      unlisteners.push(unlistenChat, unlistenSettings, unlistenClose);
+    track(listen("open-chat", () => setMainView("chat")));
+    track(listen("open-settings", () => setMainView("settings")));
+    try {
+      track(
+        getCurrentWindow().onCloseRequested(async (event) => {
+          event.preventDefault();
+          try {
+            await getCurrentWindow().hide();
+          } catch {
+            // Browser dev fallback.
+          }
+        })
+      );
+    } catch {
+      // Browser dev fallback.
     }
 
-    setupListeners();
-    return () => unlisteners.forEach((fn) => fn());
+    return () => {
+      disposed = true;
+      unlisteners.forEach((fn) => fn());
+    };
   }, [windowLabel]);
 
   if (windowLabel === "pet") {
     return (
-      <Suspense fallback={null}>
-        <Pet />
-      </Suspense>
+      <>
+        <Suspense fallback={null}>
+          <Pet />
+        </Suspense>
+        <ApprovalOverlay compact />
+      </>
     );
   }
 

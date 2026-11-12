@@ -37,6 +37,44 @@ fn pet_drag_start(app: tauri::AppHandle) {
     }
 }
 
+/// Windows 下以 GUI 子系统运行时，启动控制台程序会闪一下黑窗；加上 CREATE_NO_WINDOW 隐藏。
+fn hidden_command(program: &str) -> Command {
+    #[allow(unused_mut)]
+    let mut command = Command::new(program);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
+fn is_web_url(target: &str) -> bool {
+    let lower = target.to_lowercase();
+    lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("mailto:")
+}
+
+/// 经 `cmd /C start` 启动时 cmd 会解释这些元字符（Rust 不会替 cmd.exe 转义），
+/// 不拦截的话 `a & calc` 之类的输入就能注入额外命令。
+fn has_cmd_metachar(target: &str) -> bool {
+    target
+        .chars()
+        .any(|c| matches!(c, '&' | '|' | '<' | '>' | '^' | '"' | '%' | '!') || c.is_control())
+}
+
+/// 用系统默认程序打开 URL，不经过 cmd，`?a=1&b=2` 这类查询串不会被截断或注入。
+fn open_url_with_default_handler(url: &str) -> Result<(), String> {
+    if url.chars().any(|c| c.is_whitespace() || c == '"' || c.is_control()) {
+        return Err("URL 不能包含空白、引号或控制字符".into());
+    }
+    hidden_command("rundll32.exe")
+        .args(["url.dll,FileProtocolHandler", url])
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("启动失败: {error}"))
+}
+
 #[tauri::command]
 fn launch_app(target: String) -> Result<String, String> {
     let target = target.trim();
@@ -44,31 +82,34 @@ fn launch_app(target: String) -> Result<String, String> {
         return Err("目标不能为空".into());
     }
 
+    if is_web_url(target) {
+        open_url_with_default_handler(target)?;
+        return Ok(format!("已打开 {target}"));
+    }
+
     let target_lower = target.to_lowercase();
-    let (program, args): (&str, Vec<&str>) = match target_lower.as_str() {
-        "notepad" | "记事本" => ("notepad.exe", vec![]),
-        "calculator" | "calc" | "计算器" => ("calc.exe", vec![]),
-        "explorer" | "file explorer" | "资源管理器" => ("explorer.exe", vec![]),
-        "task manager" | "taskmgr" | "任务管理器" => ("taskmgr.exe", vec![]),
-        "paint" | "mspaint" | "画图" => ("mspaint.exe", vec![]),
-        "terminal" | "cmd" | "命令行" => ("cmd.exe", vec!["/K"]),
-        "settings" | "设置" | "系统设置" => ("cmd.exe", vec!["/C", "start", "", "ms-settings:"]),
+    let spawned = match target_lower.as_str() {
+        "notepad" | "记事本" => Command::new("notepad.exe").spawn(),
+        "calculator" | "calc" | "计算器" => Command::new("calc.exe").spawn(),
+        "explorer" | "file explorer" | "资源管理器" => Command::new("explorer.exe").spawn(),
+        "task manager" | "taskmgr" | "任务管理器" => Command::new("taskmgr.exe").spawn(),
+        "paint" | "mspaint" | "画图" => Command::new("mspaint.exe").spawn(),
+        // 终端需要可见窗口：用 start 新开一个控制台。
+        "terminal" | "cmd" | "命令行" => hidden_command("cmd.exe")
+            .args(["/C", "start", "", "cmd.exe", "/K"])
+            .spawn(),
+        "settings" | "设置" | "系统设置" => hidden_command("cmd.exe")
+            .args(["/C", "start", "", "ms-settings:"])
+            .spawn(),
         _ => {
-            if target.starts_with("http://") || target.starts_with("https://") || target.starts_with("mailto:") {
-                ("cmd.exe", vec!["/C", "start", "", target])
-            } else if target.contains(':') || target.contains('\\') || target.ends_with(".exe") {
-                ("cmd.exe", vec!["/C", "start", "", target])
-            } else {
-                ("cmd.exe", vec!["/C", "start", "", target])
+            if has_cmd_metachar(target) {
+                return Err("目标包含不允许的特殊字符（& | < > ^ \" % !）".into());
             }
+            hidden_command("cmd.exe").args(["/C", "start", "", target]).spawn()
         }
     };
 
-    Command::new(program)
-        .args(args)
-        .spawn()
-        .map_err(|error| format!("启动失败: {error}"))?;
-
+    spawned.map_err(|error| format!("启动失败: {error}"))?;
     Ok(format!("已打开 {target}"))
 }
 
@@ -85,7 +126,7 @@ fn system_action(action: String, target: Option<String>) -> Result<String, Strin
         "open_terminal" => launch_app("terminal".into()),
         "open_url" => {
             let url = target.unwrap_or_default();
-            if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:") {
+            if is_web_url(url.trim()) {
                 launch_app(url)
             } else {
                 Err("URL 必须以 http://、https:// 或 mailto: 开头".into())
@@ -165,17 +206,27 @@ fn claude_binary(explicit: Option<String>) -> String {
             return value.trim().to_string();
         }
     }
-    // 先看 PATH。
-    if std::process::Command::new("claude")
-        .arg("--version")
-        .output()
-        .map(|result| result.status.success())
-        .unwrap_or(false)
-    {
-        return "claude".to_string();
+    // 先看 PATH（Command 只会补 .exe；npm 全局安装得到的是 claude.cmd，单独再试一次）。
+    for candidate in ["claude", "claude.cmd"] {
+        let ok = hidden_command(candidate)
+            .arg("--version")
+            .output()
+            .map(|result| result.status.success())
+            .unwrap_or(false);
+        if ok {
+            return candidate.to_string();
+        }
     }
-    // Claude Code 桌面版会把 CLI 放在版本目录里，通常不在 PATH。
     if let Ok(profile) = std::env::var("USERPROFILE") {
+        // 原生安装器的默认位置。
+        let native = std::path::Path::new(&profile)
+            .join(".local")
+            .join("bin")
+            .join("claude.exe");
+        if native.exists() {
+            return native.to_string_lossy().to_string();
+        }
+        // Claude Code 桌面版会把 CLI 放在版本目录里，通常不在 PATH。
         let roots = [
             format!("{}/AppData/Roaming/Claude/claude-code", profile),
             format!("{}/AppData/Local/Claude-3p/claude-code", profile),
@@ -210,36 +261,66 @@ fn claude_binary(explicit: Option<String>) -> String {
     "claude".to_string()
 }
 
-/// 检测本机 Claude Code CLI。前端可传入显式路径（CLI 常常不在 PATH 里）。
-#[tauri::command]
-fn check_local_claude(path: Option<String>) -> Result<LocalClaudeStatus, String> {
+fn check_local_claude_blocking(path: Option<String>) -> LocalClaudeStatus {
     let binary = claude_binary(path);
-    match std::process::Command::new(&binary).arg("--version").output() {
-        Ok(result) if result.status.success() => Ok(LocalClaudeStatus {
+    match hidden_command(&binary).arg("--version").output() {
+        Ok(result) if result.status.success() => LocalClaudeStatus {
             available: true,
             version: String::from_utf8_lossy(&result.stdout).trim().to_string(),
             path: binary,
             detail: "本机 Claude Code CLI 可用（复用已登录凭据）".into(),
-        }),
-        Ok(result) => Ok(LocalClaudeStatus {
+        },
+        Ok(result) => LocalClaudeStatus {
             available: false,
             version: String::new(),
             path: binary,
             detail: String::from_utf8_lossy(&result.stderr).trim().to_string(),
-        }),
-        Err(error) => Ok(LocalClaudeStatus {
+        },
+        Err(error) => LocalClaudeStatus {
             available: false,
             version: String::new(),
             path: binary,
             detail: format!("未找到可执行文件：{}", error),
-        }),
+        },
     }
+}
+
+/// 检测本机 Claude Code CLI。前端可传入显式路径（CLI 常常不在 PATH 里）。
+/// 用 async + spawn_blocking：同步命令跑在主线程上，探测期间所有窗口都会卡住。
+#[tauri::command]
+async fn check_local_claude(path: Option<String>) -> Result<LocalClaudeStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || check_local_claude_blocking(path))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+fn spawn_pipe_reader<R: std::io::Read + Send + 'static>(
+    pipe: Option<R>,
+) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut buffer = Vec::new();
+        if let Some(mut pipe) = pipe {
+            let _ = pipe.read_to_end(&mut buffer);
+        }
+        buffer
+    })
 }
 
 /// 无头调用本机 Claude Code。刻意不加 --bare：这样会复用本机登录态、
 /// MCP 配置与 CLAUDE.md，而不是要求另配 ANTHROPIC_API_KEY。
+/// 放到阻塞线程池里跑，避免最长 180 秒的调用冻结主线程（宠物、聊天、托盘）。
 #[tauri::command]
-fn run_local_claude(
+async fn run_local_claude(
+    prompt: String,
+    path: Option<String>,
+    allow_tools: Option<String>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || run_local_claude_blocking(prompt, path, allow_tools))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn run_local_claude_blocking(
     prompt: String,
     path: Option<String>,
     allow_tools: Option<String>,
@@ -250,31 +331,41 @@ fn run_local_claude(
         return Err("任务不能为空".into());
     }
     // 默认只放行只读工具；要写文件或跑命令必须用户显式配置。
-    let allowed = allow_tools.unwrap_or_else(|| "Read".to_string());
+    let allowed = allow_tools
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "Read".to_string());
 
-    let mut child = std::process::Command::new(&binary)
+    let mut child = hidden_command(&binary)
         .args(["-p", trimmed, "--output-format", "text", "--allowedTools", &allowed])
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|error| format!("启动 Claude Code 失败：{}", error))?;
 
+    // 必须边运行边读管道：管道缓冲区只有几 KB，输出一长子进程就会卡在写入上，
+    // 永远不会退出，最后只能等到超时。
+    let stdout_reader = spawn_pipe_reader(child.stdout.take());
+    let stderr_reader = spawn_pipe_reader(child.stderr.take());
+
     let started = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(180);
-    loop {
-        if child.try_wait().map_err(|error| error.to_string())?.is_some() {
-            break;
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            break status;
         }
         if started.elapsed() > timeout {
             let _ = child.kill();
+            let _ = child.wait();
             return Err("本机 Claude 调用超时（180 秒）".into());
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
-    }
+    };
 
-    let output = child.wait_with_output().map_err(|error| error.to_string())?;
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout_bytes = stdout_reader.join().unwrap_or_default();
+    let stderr_bytes = stderr_reader.join().unwrap_or_default();
+    let stdout = String::from_utf8_lossy(&stdout_bytes).trim().to_string();
+    let stderr = String::from_utf8_lossy(&stderr_bytes).trim().to_string();
     let detail = if stdout.is_empty() {
         stderr.clone()
     } else if stderr.is_empty() {
@@ -283,7 +374,7 @@ fn run_local_claude(
         format!("{}\n{}", stdout, stderr)
     };
 
-    if !output.status.success() || detail.contains("Failed to authenticate") {
+    if !status.success() || detail.contains("Failed to authenticate") {
         if detail.contains("Failed to authenticate") || detail.contains("OAuth session expired") {
             return Err(
                 "本机 Claude 登录态已过期：请先在 Claude Code 里重新登录，或配置 ANTHROPIC_API_KEY"
@@ -303,6 +394,7 @@ fn run_local_claude(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             tray::create_tray(app)?;

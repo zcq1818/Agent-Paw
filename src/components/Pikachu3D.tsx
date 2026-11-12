@@ -141,6 +141,7 @@ export function Pikachu3D({ state, size = 128, skin, facing = "right" }: Pikachu
   facingRef.current = facing;
 
   useEffect(() => {
+    setStatus("loading");
     const container = containerRef.current;
     if (!container) return;
 
@@ -264,9 +265,16 @@ export function Pikachu3D({ state, size = 128, skin, facing = "right" }: Pikachu
         if (!(object instanceof THREE.Mesh)) return;
         object.geometry?.dispose();
         const list = Array.isArray(object.material) ? object.material : [object.material];
-        list.forEach((item) => item?.dispose());
+        list.forEach((item) => {
+          if (!item) return;
+          Object.values(item).forEach((value) => {
+            if (value instanceof THREE.Texture) value.dispose();
+          });
+          item.dispose();
+        });
       });
       renderer.dispose();
+      renderer.forceContextLoss();
       if (renderer.domElement.parentNode === container) container.removeChild(renderer.domElement);
       materialsRef.current = [];
       morphRef.current = [];

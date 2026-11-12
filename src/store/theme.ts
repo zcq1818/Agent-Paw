@@ -74,16 +74,20 @@ export function useThemeClass() {
     };
 
     window.addEventListener("storage", onStorage);
+    // listen() 是异步注册：cleanup 先于注册完成时，要在注册完成后立刻注销，避免重复监听。
+    let disposed = false;
     let unlisten: (() => void) | undefined;
     listen<{ theme?: unknown }>("theme-changed", (event) => {
       if (isTheme(event.payload?.theme)) syncTheme(event.payload.theme);
     })
       .then((fn) => {
-        unlisten = fn;
+        if (disposed) fn();
+        else unlisten = fn;
       })
       .catch(() => {});
 
     return () => {
+      disposed = true;
       window.removeEventListener("storage", onStorage);
       unlisten?.();
     };

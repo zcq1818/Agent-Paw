@@ -9,6 +9,8 @@ import { createHelpSurface, createSystemSurface, createTaskSurface, type Surface
 import { fetchTodayNews, formatNewsMarkdown, markTodayNewsPushed, shouldPushTodayNews } from "../agent/news";
 import { useActivityStore } from "./activity";
 import { reduceToolRuns, subscribeToolEvents, type ToolEvent, type ToolRun } from "../agent/toolEvents";
+import { confirmSystemAction } from "../agent/tools";
+import { getActiveBotId } from "../agent/scope";
 
 interface AgentState {
   isStreaming: boolean;
@@ -23,6 +25,9 @@ interface AgentState {
 }
 
 let activeController: AbortController | null = null;
+
+/** 发给模型的历史条数上限；不设上限时长对话会超出上下文窗口直接报错。 */
+const MAX_HISTORY_MESSAGES = 40;
 
 function summarizeForBubble(text: string) {
   const cleaned = text
@@ -46,9 +51,12 @@ function sleep(ms: number) {
 }
 
 function detectLocalAppTarget(text: string): string | null {
-  const input = text.trim();
-  const lower = input.toLowerCase();
-  const url = input.match(/https?:\/\/[^\s]+/i)?.[0];
+  const input = text.trim().replace(/[。.!！?？]+$/, "");
+  const command = input.match(/^(?:帮我|请帮我|请|皮卡|麻烦)?\s*(?:打开|启动|运行|open|launch|start)\s*(.+)$/i);
+  if (!command || input.length > 40) return null;
+  const subject = command[1].trim();
+
+  const url = subject.match(/^https?:\/\/\S+$/i)?.[0];
   if (url) return url;
 
   const aliases: Array<[RegExp, string]> = [
@@ -65,22 +73,24 @@ function detectLocalAppTarget(text: string): string | null {
     [/谷歌|google/i, "https://www.google.com"],
   ];
 
-  if (!/(打开|启动|开启|运行|open|launch|start)/i.test(input)) return null;
+  // 别名只匹配目标开头，避免 "knowledge" 里的 "edge" 之类误命中。
   for (const [pattern, target] of aliases) {
-    if (pattern.test(input)) return target;
+    if (new RegExp(`^(${pattern.source})`, "i").test(subject)) return target;
   }
 
-  const customTarget = input
-    .replace(/^(帮我|请|请帮我|皮卡)?\s*(打开|启动|开启|运行|open|launch|start)\s*/i, "")
-    .trim();
-  return customTarget.length > 1 ? customTarget : null;
+  // 自定义目标只接受路径 / exe，或不含空格的短名称（如“微信”“steam”）；
+  // 其余像句子的输入（“start a React project”）交给模型处理。
+  const looksLikePath = /^[a-z]:[\\/]|^\\\\|\.exe$/i.test(subject);
+  const looksLikeName = !/\s/.test(subject) && subject.length >= 2 && subject.length <= 12;
+  return looksLikePath || looksLikeName ? subject : null;
 }
 
 async function tryHandleLocalSystemCommand(text: string): Promise<string | null> {
   const target = detectLocalAppTarget(text);
   if (!target) return null;
 
-  if (!window.confirm(`皮卡准备打开：${target}\n\n确认执行吗？`)) {
+  // 与工具调用统一走内联审批卡片（window.confirm 会阻塞整个窗口）。
+  if (!(await confirmSystemAction(`皮卡准备打开：${target}`))) {
     return "已取消打开应用。";
   }
 
@@ -94,21 +104,21 @@ async function tryHandleLocalSystemCommand(text: string): Promise<string | null>
 
 function createLocalSurface(text: string): { content: string; surface: SurfaceSpec } | null {
   const input = text.trim();
-  if (/(能做什么|帮助|功能|介绍|help)/i.test(input)) {
+  if (/^(你|皮卡)?(能|会|可以)?(做|干)?(什么|啥)[?？]*$|^(你有)?(哪些|什么)功能[?？]*$|^(帮助|help|功能介绍|使用说明)[?？!！]*$/i.test(input)) {
     return {
       content: "我整理了一张能力卡片，你可以从这里继续点选。",
       surface: createHelpSurface(),
     };
   }
 
-  if (/(任务|待办|日程|todo|schedule)/i.test(input) && /(查看|打开|列出|看看|show|list)?/i.test(input)) {
+  if (input.length <= 20 && /^(查看|打开|列出|看看|看下|看一下|show|list)\s*(我的)?(今天的)?(任务|待办|日程|todo|todos|schedule)/i.test(input)) {
     return {
       content: "这是你最近的任务和日程。",
       surface: createTaskSurface(),
     };
   }
 
-  if (/(系统快捷|快捷操作|打开应用|系统状态|system)/i.test(input)) {
+  if (input.length <= 20 && /^(系统快捷|快捷操作|系统状态|system)/i.test(input)) {
     return {
       content: "我准备了一张系统快捷操作卡片，执行前都会再次确认。",
       surface: createSystemSurface(),
@@ -135,15 +145,13 @@ async function maybePushTodayNews(addMessage: (message: { role: "assistant"; con
 
 function extractExplicitMemory(text: string): string | null {
   const patterns = [
-    /(?:请|帮我)?记住[:：]?\s*(.+)$/i,
-    /(?:你要|需要)?记得[:：]?\s*(.+)$/i,
-    /我的(.{1,30}?)(?:是|叫|喜欢|偏好是)(.+)$/i,
-    /我(?:喜欢|偏好|常用|习惯|正在做|计划)(.+)$/i,
+    /^(?:请|帮我|皮卡)?\s*(?:记住|记一下|记下)[:：,，\s]\s*(.+)$/is,
+    /^(?:你要|你需要|要|请)记得[:：,，\s]\s*(.+)$/is,
   ];
+  const input = text.trim();
   for (const pattern of patterns) {
-    const match = text.match(pattern);
-    const value = match?.[1] || match?.[0];
-    if (value && value.trim().length >= 2) return value.trim();
+    const value = input.match(pattern)?.[1]?.trim();
+    if (value && value.length >= 2) return value;
   }
   return null;
 }
@@ -173,7 +181,7 @@ async function tryHandleMemoryCommand(text: string): Promise<string | null> {
     return `我已经记住了：${explicit}`;
   }
 
-  if (/(你记得什么|读取记忆|查看记忆|我的记忆|你知道我什么|我喜欢什么|我的偏好)/i.test(text)) {
+  if (/^(你都?记得(什么|啥)|读取记忆|查看记忆|我的记忆|你知道我(什么|啥)|我喜欢什么|我的偏好(是什么)?)[?？]*$/i.test(text.trim())) {
     const memories = await memoryStore.search(text, 8);
     if (memories.length === 0) return "我现在还没有保存到可用记忆。你可以直接说“记住：我喜欢……”。";
     return `我找到这些相关记忆：\n${memories.map((memory) => `- [${memory.type}] ${memory.content}`).join("\n")}`;
@@ -183,12 +191,14 @@ async function tryHandleMemoryCommand(text: string): Promise<string | null> {
 }
 
 async function tryHandleSkillCommand(text: string): Promise<string | null> {
-  if (/(列出|查看|有哪些).*(skill|技能)|自定义技能/i.test(text)) {
+  if (/^(列出|查看|看看)?\s*(你的|当前的?)?(自定义)?\s*(skill|技能)(列表)?[?？]*$|^(你)?有哪些(自定义)?\s*(skill|技能)[?？]*$/i.test(text.trim())) {
     const skills = customSkillsStore.getAll();
     if (skills.length === 0) return "现在还没有自定义 Skill。你可以说“帮你自己创建一个 xxx 技能，用来……”。";
     return `当前自定义 Skill：\n${skills.map((skill) => `- ${skill.active ? "启用" : "停用"} ${skill.name}: ${skill.description}`).join("\n")}`;
   }
 
+  // 必须以“(帮你自己/给自己)创建…技能”开头，避免“生成一个 Python 技能学习计划”之类误触发。
+  if (!/^(?:请|帮我|帮你自己|给你自己|给自己|你)?\s*(?:创建|新建|写一个|做一个)/i.test(text.trim())) return null;
   const createMatch = text.match(/(?:创建|新建|写一个|做一个|生成).{0,8}(?:skill|技能).{0,8}(?:叫|名为|名称是)?\s*([^，。,.：:]+)?[，。,.：:]?\s*(?:用来|用于|可以|能够|功能是|作用是)?\s*(.*)$/i);
   if (!createMatch || !/(skill|技能)/i.test(text)) return null;
 
@@ -213,7 +223,7 @@ async function tryHandleSkillCommand(text: string): Promise<string | null> {
 }
 
 function tryHandleActivityCommand(text: string): string | null {
-  if (!/(电脑|窗口|应用|活动|使用情况|干嘛|在做什么|行为|监控|观察|分析)/.test(text)) return null;
+  if (!/(活动观察|活动监控|活动记录|活动日志|电脑活动|电脑使用|使用情况|我(今天|最近)?(都)?在(电脑上)?(干嘛|做什么|干什么)|用了哪些(应用|软件))/.test(text)) return null;
   const activity = useActivityStore.getState();
   if (/(开启|打开|启用).*(活动|观察|监控)/.test(text)) {
     activity.setEnabled(true);
@@ -242,16 +252,25 @@ export const useAgentStore = create<AgentState>((set) => ({
 
   sendMessage: async (text: string) => {
     activeController?.abort();
-    activeController = new AbortController();
+    // 用局部变量持有本次的 controller：如果上一轮还没结束，它的 finally
+    // 不能把这一轮的 controller 清空、也不能把 isStreaming 置回 false。
+    const controller = new AbortController();
+    activeController = controller;
     set({ isStreaming: true, streamText: "", error: null, currentToolRuns: [] });
     notifyPet("pet-thinking");
 
-    const addMessage = useChatStore.getState().addMessage;
+    // 记住发起时的 Bot 和会话：生成期间切换 Bot / 会话，回复也写回原处。
+    const target = { botId: getActiveBotId(), conversationId: useChatStore.getState().activeConversationId };
+    const addMessage = (msg: Parameters<ReturnType<typeof useChatStore.getState>["addMessage"]>[0]) =>
+      useChatStore.getState().addMessageTo(target, msg);
     const messages = useChatStore.getState().messages;
-    const history = messages.map((message) => ({
-      role: message.role,
-      content: message.content,
-    }));
+    const history = messages
+      .filter((message) => message.content.trim())
+      .slice(-MAX_HISTORY_MESSAGES)
+      .map((message) => ({
+        role: message.role,
+        content: message.content,
+      }));
     let toolRuns: ToolRun[] = [];
     const unsubscribeToolEvents = subscribeToolEvents((event) => {
       toolRuns = reduceToolRuns(toolRuns, event);
@@ -313,7 +332,7 @@ export const useAgentStore = create<AgentState>((set) => ({
           set((state) => ({ streamText: state.streamText + chunk }));
         },
         {
-          signal: activeController.signal,
+          signal: controller.signal,
           onToolEvent: (event: ToolEvent) => {
             toolRuns = reduceToolRuns(toolRuns, event);
             set({ currentToolRuns: [...toolRuns] });
@@ -344,8 +363,10 @@ export const useAgentStore = create<AgentState>((set) => ({
       notifyPet("pet-say", { message: `皮卡... ${errorMsg}` });
     } finally {
       unsubscribeToolEvents();
-      activeController = null;
-      set({ isStreaming: false, currentToolRuns: [] });
+      if (activeController === controller) {
+        activeController = null;
+        set({ isStreaming: false, currentToolRuns: [] });
+      }
     }
   },
 

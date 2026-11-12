@@ -132,6 +132,8 @@ export function CustomSkillsSettings({ onClose }: CustomSkillsSettingsProps) {
       }
     };
     reader.readAsText(file);
+    // 清空 value，否则再次选择同一个文件不会触发 onChange。
+    e.target.value = "";
   };
 
   const stats = customSkillsStore.getStats();
