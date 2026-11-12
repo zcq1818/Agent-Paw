@@ -70,9 +70,10 @@ function detectLocalAppTarget(text: string): string | null {
     [/谷歌|google/i, "https://www.google.com"],
   ];
 
-  // 别名只匹配目标开头，避免 "knowledge" 里的 "edge" 之类误命中。
+  // 别名必须匹配整个目标：“打开记事本，输入一句话”这类带后续步骤的指令要交给模型，
+  // 否则只打开软件就结束了。也避免 "knowledge" 里的 "edge" 之类误命中。
   for (const [pattern, target] of aliases) {
-    if (new RegExp(`^(${pattern.source})`, "i").test(subject)) return target;
+    if (new RegExp(`^(${pattern.source})\\s*(一下|吧)?$`, "i").test(subject)) return target;
   }
 
   // 自定义目标只接受路径 / exe，或不含空格的短名称（如“微信”“steam”）；

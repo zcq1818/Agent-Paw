@@ -588,7 +588,19 @@ pub async fn ui_snapshot(id: Option<i64>, max_nodes: Option<usize>) -> Result<Ui
                     .map(|w| w.id)
                     .ok_or("没有找到可读取的窗口")?,
             };
-            snapshot_window(target, max_nodes.unwrap_or(220).clamp(20, 600))
+            let limit = max_nodes.unwrap_or(220).clamp(20, 600);
+            let first = snapshot_window(target, limit)?;
+            // Chromium / Electron（浏览器、Claude、VS Code、飞书……）第一次被 UI Automation
+            // 访问时才开启无障碍树，首次只能读到标题栏按钮。稍等一下再读一次。
+            if first.nodes.len() <= 5 {
+                std::thread::sleep(std::time::Duration::from_millis(900));
+                if let Ok(second) = snapshot_window(target, limit) {
+                    if second.nodes.len() > first.nodes.len() {
+                        return Ok(second);
+                    }
+                }
+            }
+            Ok(first)
         })
         .await
     }
