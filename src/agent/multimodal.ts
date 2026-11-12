@@ -5,7 +5,7 @@
  * - 截图分析
  */
 
-import { buildChatCompletionsUrl, buildRequestHeaders, loadConfig, parseConfigJson } from "./kernel";
+import { buildChatCompletionsUrl, buildRequestHeaders, fetchModelApi, loadConfig, parseConfigJson } from "./kernel";
 
 export interface Tool {
   name: string;
@@ -142,7 +142,7 @@ const visionTools: Tool[] = [
       }
 
       try {
-        const resp = await fetch(buildChatCompletionsUrl(config), {
+        const resp = await fetchModelApi(buildChatCompletionsUrl(config), {
           method: "POST",
           headers: buildRequestHeaders(config),
           body: JSON.stringify({
@@ -214,7 +214,7 @@ const visionTools: Tool[] = [
             }
 
             const question = (args.question as string) || "请描述这张图片的内容";
-            const resp = await fetch(buildChatCompletionsUrl(config), {
+            const resp = await fetchModelApi(buildChatCompletionsUrl(config), {
               method: "POST",
               headers: buildRequestHeaders(config),
               body: JSON.stringify({
@@ -344,7 +344,7 @@ const screenshotTools: Tool[] = [
         if (!config.apiKey) return "请先在设置中配置 API Key";
 
         const question = (args.question as string) || "请描述这个屏幕的内容";
-        const resp = await fetch(buildChatCompletionsUrl(config), {
+        const resp = await fetchModelApi(buildChatCompletionsUrl(config), {
           method: "POST",
           headers: buildRequestHeaders(config),
           body: JSON.stringify({

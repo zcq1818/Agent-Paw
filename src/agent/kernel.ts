@@ -7,6 +7,15 @@ import { securityManager } from "./security";
 import { getSkillsContext } from "./customSkills";
 import type { ToolEvent } from "./toolEvents";
 import { BROWSER_USER_AGENT, fetchExternal } from "./http";
+import {
+  defaultProfileName,
+  getActiveModelProfile,
+  listModelProfiles,
+  pickModelSettings,
+  setActiveModelProfile,
+  upsertModelProfile,
+  type ModelProfile,
+} from "./modelProfiles";
 import { getActiveBot, useBotStore, type BotModelOverride } from "../store/bots";
 
 export type ProviderId = "agnes" | "openai" | "deepseek" | "openrouter" | "custom" | string;
@@ -89,6 +98,31 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     notes: "Uses the Anthropic Messages API (/v1/messages), not OpenAI Chat Completions.",
   },
   {
+    id: "xfyun-spark",
+    label: "讯飞星火",
+    baseUrl: "https://spark-api-open.xf-yun.com/v1",
+    model: "lite",
+    stream: true,
+    enableTools: false,
+    temperature: 0.7,
+    maxTokens: 4096,
+    apiKeyPlaceholder: "控制台 HTTP 服务接口认证信息里的 APIPassword",
+    notes:
+      "API Key 填讯飞控制台“HTTP 服务接口认证信息”里的 APIPassword（不是 APIKey / APISecret）。模型名：lite、generalv3、pro-128k、generalv3.5、max-32k、4.0Ultra；X1 模型改用 Base URL https://spark-api-open.xf-yun.com/v2、模型名 x1。只有 max / 4.0Ultra 等支持工具调用。",
+  },
+  {
+    id: "xfyun-maas",
+    label: "讯飞星辰 MaaS",
+    baseUrl: "https://maas-api.cn-huabei-1.xf-yun.com/v1",
+    model: "xdeepseekv3",
+    stream: true,
+    enableTools: false,
+    temperature: 0.7,
+    maxTokens: 4096,
+    apiKeyPlaceholder: "星辰 MaaS 控制台的 API Key",
+    notes: "模型名填星辰 MaaS 控制台里服务的 modelId（例如 xdeepseekv3、xdeepseekr1）。",
+  },
+  {
     id: "openrouter",
     label: "OpenRouter",
     baseUrl: "https://openrouter.ai/api/v1",
@@ -156,13 +190,40 @@ export function normalizeConfig(config: Partial<AgentConfig>): AgentConfig {
   };
 }
 
-/** 全局配置：不含任何 Bot 覆盖，供设置页保存时使用。 */
-function loadGlobalConfig(): AgentConfig {
+/** paw_config：能力开关等全局设置（以及多模型之前的旧版单一模型配置）。 */
+function loadBaseConfig(): AgentConfig {
   try {
     const saved = localStorage.getItem("paw_config");
     if (saved) return normalizeConfig(JSON.parse(saved));
   } catch {}
   return normalizeConfig(DEFAULT_CONFIG);
+}
+
+/** 全局配置 = 全局能力开关 + 当前选中的模型配置；不含任何 Bot 覆盖。 */
+function loadGlobalConfig(): AgentConfig {
+  const base = loadBaseConfig();
+  const profile = getActiveModelProfile();
+  return profile ? normalizeConfig({ ...base, ...pickModelSettings(profile) }) : base;
+}
+
+/**
+ * 读取已保存的模型列表；第一次使用时把旧版的单一模型配置迁移成第一条，
+ * 保证升级后原来的 Key 和模型不丢。
+ */
+export function ensureModelProfiles(): ModelProfile[] {
+  const existing = listModelProfiles();
+  if (existing.length > 0) return existing;
+  const base = loadBaseConfig();
+  const settings = pickModelSettings(base);
+  const profile = upsertModelProfile({ ...settings, name: defaultProfileName(settings) });
+  setActiveModelProfile(profile.id);
+  return [profile];
+}
+
+/** 新建模型时的默认值（取自服务商预设）。 */
+export function modelSettingsFromPreset(provider: ProviderId) {
+  const preset = getProviderPreset(provider);
+  return pickModelSettings(normalizeConfig({ ...loadBaseConfig(), ...preset, provider, apiKey: "", extraHeaders: "", extraBody: "" }));
 }
 
 /** 取指定 Bot 的生效配置：全局配置 + 该 Bot 的模型覆盖。Rooms 按 Bot 分别调用时使用。 */
@@ -234,6 +295,44 @@ export function buildAnthropicRequest(config: AgentConfig, system: string, promp
   };
 }
 
+/**
+ * 从接口返回中提取错误信息。除了 OpenAI 的 {error:{message}}，
+ * 讯飞星火等会在 HTTP 200 里返回 {code: 非 0, message}，之前会被误报成“返回为空”。
+ */
+export function extractApiError(data: any): string | null {
+  if (!data || typeof data !== "object") return null;
+  if (data.error) {
+    const err = data.error;
+    return typeof err === "string" ? err : err.message || JSON.stringify(err).slice(0, 220);
+  }
+  if (typeof data.code === "number" && data.code !== 0) {
+    return `${data.code} ${data.message || data.msg || ""}`.trim();
+  }
+  if (typeof data.code === "string" && data.code !== "0" && data.message && !data.choices) {
+    return `${data.code} ${data.message}`;
+  }
+  return null;
+}
+
+/** 把网络层异常翻译成能看懂的提示。 */
+export function describeNetworkError(error: unknown, url: string): Error {
+  if (error instanceof DOMException && error.name === "AbortError") return error as Error;
+  const raw = error instanceof Error ? error.message : String(error);
+  if (/not allowed on the configured scope|scope/i.test(raw)) {
+    return new Error(`请求地址不在允许范围内：${url}`);
+  }
+  return new Error(`无法连接到 ${url}：${raw}。请检查 Base URL、网络或代理设置。`);
+}
+
+/** 调用模型接口统一走 Rust 侧 HTTP：很多服务商（如讯飞）不返回 CORS 头，WebView 里直接 fetch 会被拦截。 */
+export async function fetchModelApi(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetchExternal(url, init);
+  } catch (error) {
+    throw describeNetworkError(error, url);
+  }
+}
+
 export function getEmbeddingModel(config = loadConfig()): string {
   return config.embeddingModel || "text-embedding-3-small";
 }
@@ -242,7 +341,8 @@ export async function testConnection(configOverride?: Partial<AgentConfig>): Pro
   const config = normalizeConfig({ ...loadConfig(), ...configOverride });
   if (!config.apiKey) throw new Error("请先填写 API Key");
 
-  const resp = await fetch(buildChatCompletionsUrl(config), {
+  const url = buildChatCompletionsUrl(config);
+  const resp = await fetchModelApi(url, {
     method: "POST",
     headers: buildRequestHeaders(config),
     body: JSON.stringify({
@@ -257,13 +357,16 @@ export async function testConnection(configOverride?: Partial<AgentConfig>): Pro
     }),
   });
 
-  if (!resp.ok) {
-    const errorBody = await resp.text();
-    throw new Error(`连接失败 (${resp.status}): ${errorBody.slice(0, 220)}`);
+  const text = await resp.text();
+  let data: any = null;
+  try {
+    data = JSON.parse(text);
+  } catch {}
+  const apiError = extractApiError(data);
+  if (!resp.ok || apiError) {
+    throw new Error(`连接失败 (${resp.status})：${apiError || text.slice(0, 220)}`);
   }
-
-  const data = await resp.json();
-  return data.choices?.[0]?.message?.content || "OK";
+  return data?.choices?.[0]?.message?.content || "OK";
 }
 
 function buildSystemPrompt(): string {
@@ -658,7 +761,7 @@ export async function streamChat(
 
     if (options.signal?.aborted) throw new DOMException("生成已停止", "AbortError");
 
-    let resp = await fetch(url, {
+    let resp = await fetchModelApi(url, {
       method: "POST",
       headers: buildRequestHeaders(config),
       body: JSON.stringify(requestBody),
@@ -674,7 +777,7 @@ export async function streamChat(
         });
         delete requestBody.tools;
         shouldSendTools = false;
-        resp = await fetch(url, {
+        resp = await fetchModelApi(url, {
           method: "POST",
           headers: buildRequestHeaders(config),
           body: JSON.stringify(requestBody),
@@ -696,6 +799,8 @@ export async function streamChat(
 
     if (!shouldStream) {
       const data = await resp.json();
+      const apiError = extractApiError(data);
+      if (apiError) throw new Error(`API 错误：${apiError}`);
       const message = data.choices?.[0]?.message;
       const content = message?.content || "";
       const nonStreamToolCalls: RuntimeToolCall[] = (message?.tool_calls || [])
@@ -747,8 +852,16 @@ export async function streamChat(
         return;
       }
 
+      let parsed: any;
       try {
-        const parsed = JSON.parse(data);
+        parsed = JSON.parse(data);
+      } catch {
+        return;
+      }
+      // 流式过程中服务商也可能直接推一条错误（讯飞是 {code, message}）。
+      const apiError = extractApiError(parsed);
+      if (apiError) throw new Error(`API 错误：${apiError}`);
+      try {
         const delta = parsed.choices?.[0]?.delta;
         if (!delta) return;
 

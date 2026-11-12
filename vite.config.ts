@@ -31,9 +31,15 @@ export default defineConfig(async () => ({
             if (id.includes("react") || id.includes("scheduler")) return "vendor-react";
           }
           if (id.includes("/src/components/Settings")) return "settings";
-          if (id.includes("/src/components/ChatPanel") || id.includes("/src/components/ChatMessage") || id.includes("/src/components/SurfaceRenderer")) {
+          if (
+            id.includes("/src/components/Workbench") ||
+            id.includes("/src/components/ChatView") ||
+            id.includes("/src/components/ChatMessage") ||
+            id.includes("/src/components/SurfaceRenderer")
+          ) {
             return "workbench";
           }
+          if (id.includes("node_modules") && id.includes("lucide-react")) return "vendor-icons";
           if (id.includes("/src/agent/")) return "agent";
         },
       },

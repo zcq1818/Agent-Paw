@@ -3,6 +3,7 @@ import { chatStorageKeys, useChatStore } from "./chat";
 import { ACTIVITY_STORAGE_KEYS, useActivityStore } from "./activity";
 import { PET_CONFIG_KEY, usePetStore } from "./pet";
 import { CHAT_HOTKEY_KEY, useShortcutStore } from "./shortcut";
+import { ACTIVE_MODEL_PROFILE_KEY, MODEL_PROFILES_KEY, useModelProfileStore } from "../agent/modelProfiles";
 
 /**
  * 宠物窗口和工作台窗口是两个独立的 WebView，各自有一份 zustand 状态，
@@ -28,6 +29,9 @@ export function useCrossWindowSync() {
       }
       if (key === null || key === CHAT_HOTKEY_KEY) {
         useShortcutStore.getState().syncFromStorage();
+      }
+      if (key === null || key === MODEL_PROFILES_KEY || key === ACTIVE_MODEL_PROFILE_KEY) {
+        useModelProfileStore.getState().reload();
       }
     };
 

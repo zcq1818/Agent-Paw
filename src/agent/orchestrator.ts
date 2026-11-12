@@ -2,6 +2,7 @@ import {
   buildAnthropicRequest,
   buildChatCompletionsUrl,
   buildRequestHeaders,
+  fetchModelApi,
   isAnthropicProvider,
   loadConfig,
   normalizeConfig,
@@ -89,7 +90,7 @@ export async function callExpert(expert: Expert, prompt: string, signal?: AbortS
   if (isAnthropicProvider(config)) {
     if (!config.apiKey) throw new Error("未配置 Anthropic API Key");
     const request = buildAnthropicRequest(config, system, prompt);
-    const response = await fetch(request.url, {
+    const response = await fetchModelApi(request.url, {
       method: "POST",
       headers: request.headers,
       body: JSON.stringify(request.body),
@@ -110,7 +111,7 @@ export async function callExpert(expert: Expert, prompt: string, signal?: AbortS
   if (!config.apiKey && expert.provider !== "custom") {
     throw new Error(`未配置 ${expert.name} 的 API Key`);
   }
-  const response = await fetch(buildChatCompletionsUrl(config), {
+  const response = await fetchModelApi(buildChatCompletionsUrl(config), {
     method: "POST",
     headers: buildRequestHeaders(config),
     body: JSON.stringify({
