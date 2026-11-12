@@ -3,6 +3,8 @@ use std::process::Command;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use serde::Serialize;
 
+mod control;
+mod timeline;
 mod tray;
 
 #[derive(Serialize)]
@@ -39,7 +41,7 @@ fn pet_drag_start(app: tauri::AppHandle) {
 }
 
 /// Windows 下以 GUI 子系统运行时，启动控制台程序会闪一下黑窗；加上 CREATE_NO_WINDOW 隐藏。
-fn hidden_command(program: &str) -> Command {
+pub(crate) fn hidden_command(program: &str) -> Command {
     #[allow(unused_mut)]
     let mut command = Command::new(program);
     #[cfg(target_os = "windows")]
@@ -399,6 +401,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             tray::create_tray(app)?;
+            timeline::start(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -408,7 +411,22 @@ pub fn run() {
             system_action,
             get_active_window_info,
             check_local_claude,
-            run_local_claude
+            run_local_claude,
+            control::run_shell,
+            control::fs_list,
+            control::fs_read,
+            control::fs_write,
+            control::list_windows,
+            control::window_action,
+            control::ui_snapshot,
+            control::mouse_click,
+            control::mouse_scroll,
+            control::key_press,
+            control::type_text,
+            timeline::timeline_configure,
+            timeline::timeline_query,
+            timeline::timeline_status,
+            timeline::timeline_clear
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -8,21 +8,11 @@ import { SurfaceRenderer } from "./SurfaceRenderer";
 import { BotAvatar } from "./BotAvatar";
 import { ToolRunList } from "./ToolRunList";
 
-/** 流式期间用纯文本逐字淡入；结束后切回完整 Markdown 渲染。 */
+/** 流式期间也按 Markdown 实时排版（以前显示原始符号，结束才排版），末尾带闪烁光标。 */
 function StreamingText({ text }: { text: string }) {
-  const tailLength = Math.min(10, text.length);
-  const head = text.slice(0, text.length - tailLength);
-  const tail = Array.from(text.slice(text.length - tailLength));
   return (
-    <div className="streaming-text whitespace-pre-wrap text-[0.92rem] leading-[1.75]">
-      {head}
-      <span key={text.length} className="stream-tail">
-        {tail.map((character, index) => (
-          <span key={index} style={{ animationDelay: `${index * 26}ms` }}>
-            {character === "\n" ? <br /> : character}
-          </span>
-        ))}
-      </span>
+    <div className="markdown-body streaming-markdown max-w-none">
+      <MarkdownContent content={text} />
       <span className="stream-caret" aria-hidden="true" />
     </div>
   );

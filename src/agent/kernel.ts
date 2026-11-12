@@ -2,6 +2,9 @@ import { buildContext } from "./context";
 import { memoryStore } from "./memory";
 import { getAllTools, todoStore, calendarStore } from "./tools";
 import { getMultimodalTools } from "./multimodal";
+import { computerControlPrompt, getComputerTools, type ComputerControlMode } from "./computer";
+import { getTimelineTools, TIMELINE_PROMPT, timelineEnabled } from "./timeline";
+import { getAutomationTools } from "./automations";
 import { personalityStore } from "./personality";
 import { securityManager } from "./security";
 import { getSkillsContext } from "./customSkills";
@@ -50,6 +53,8 @@ export interface AgentConfig {
   enablePersonality?: boolean;
   enableSecurity?: boolean;
   enableMultimodal?: boolean;
+  /** 电脑控制：off 关闭 / ask 每次确认 / trusted 信任模式（危险操作仍确认）。 */
+  computerControl?: ComputerControlMode;
 }
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
@@ -162,6 +167,7 @@ const DEFAULT_CONFIG: AgentConfig = {
   enablePersonality: true,
   enableSecurity: true,
   enableMultimodal: true,
+  computerControl: "ask",
 };
 
 export function getProviderPreset(provider: ProviderId): ProviderPreset {
@@ -421,6 +427,10 @@ Agent 行为准则：
     return prompt;
   }
 
+  prompt += computerControlPrompt(config.computerControl === "off" || config.computerControl === "trusted" ? config.computerControl : "ask");
+  if (timelineEnabled()) prompt += `\n\n${TIMELINE_PROMPT}`;
+  prompt += "\n\n## 自动任务\n用户要求“每天 / 每周 / 工作日 几点帮我做某事”时，用 create_automation 建定时任务，不要只口头答应。";
+
   prompt += `
 
 ## 记忆使用指南
@@ -640,6 +650,13 @@ export function getTools(): Tool[] {
   if (config.enableMultimodal !== false) {
     tools.push(...getMultimodalTools());
   }
+  if (config.computerControl !== "off") {
+    tools.push(...getComputerTools());
+  }
+  if (timelineEnabled()) {
+    tools.push(...getTimelineTools());
+  }
+  tools.push(...getAutomationTools());
   return tools;
 }
 
@@ -654,9 +671,12 @@ async function executeRuntimeToolCalls(
   toolCalls: RuntimeToolCall[],
   tools: Tool[],
   currentMessages: any[],
-  onToolEvent?: (event: ToolEvent) => void
+  onToolEvent?: (event: ToolEvent) => void,
+  signal?: AbortSignal
 ) {
   for (const [index, tc] of toolCalls.entries()) {
+    // 用户点了停止：后面的工具调用（比如还没执行的点击、输入）一律不再执行。
+    if (signal?.aborted) throw new DOMException("生成已停止", "AbortError");
     const tool = tools.find((item) => item.name === tc.name);
     const runId = tc.id || `${tc.name}-${index}-${Date.now()}`;
     const startedAt = Date.now();
@@ -753,8 +773,10 @@ export async function streamChat(
   // 接口拒绝 tools 字段后置为 false，后续轮次不再重复“带 tools 失败 → 重试”。
   let shouldSendTools = config.enableTools !== false;
   let fullText = "";
-  let maxRounds = 5;
+  // 操作电脑往往要“看界面 → 点 → 再看”很多步，开启电脑控制时放宽工具轮次。
+  let maxRounds = config.computerControl !== "off" ? 24 : 6;
   let ranOutOfRounds = true;
+  let hitLengthLimit = false;
 
   while (maxRounds > 0) {
     maxRounds -= 1;
@@ -820,6 +842,7 @@ export async function streamChat(
       const apiError = extractApiError(data);
       if (apiError) throw new Error(`API 错误：${apiError}`);
       const message = data.choices?.[0]?.message;
+      if (data.choices?.[0]?.finish_reason === "length") hitLengthLimit = true;
       const content = message?.content || "";
       const nonStreamToolCalls: RuntimeToolCall[] = (message?.tool_calls || [])
         .map((tc: any) => ({
@@ -847,7 +870,7 @@ export async function streamChat(
           function: { name: tc.name, arguments: tc.arguments },
         })),
       });
-      await executeRuntimeToolCalls(nonStreamToolCalls, tools, currentMessages, options.onToolEvent);
+      await executeRuntimeToolCalls(nonStreamToolCalls, tools, currentMessages, options.onToolEvent, options.signal);
       continue;
     }
 
@@ -880,6 +903,7 @@ export async function streamChat(
       const apiError = extractApiError(parsed);
       if (apiError) throw new Error(`API 错误：${apiError}`);
       try {
+        if (parsed.choices?.[0]?.finish_reason === "length") hitLengthLimit = true;
         const delta = parsed.choices?.[0]?.delta;
         if (!delta) return;
 
@@ -943,7 +967,14 @@ export async function streamChat(
       })),
     });
 
-    await executeRuntimeToolCalls(toolCalls, tools, currentMessages, options.onToolEvent);
+    await executeRuntimeToolCalls(toolCalls, tools, currentMessages, options.onToolEvent, options.signal);
+  }
+
+  if (hitLengthLimit && fullText.trim()) {
+    // 模型因为 max_tokens 上限停下，明确告诉用户，而不是看起来像突然断掉。
+    const note = "\n\n> 回复达到长度上限被截断了。说“继续”我接着写，或在「设置 → 模型」里调大「单次回复上限（Max Tokens）」。";
+    fullText += note;
+    onChunk(note);
   }
 
   if (ranOutOfRounds && !fullText.trim()) {

@@ -12,12 +12,16 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { PetBubble } from "./PetBubble";
 import { BUILTIN_AVATARS, describeAvatar, loadCustomAvatars } from "../store/petAvatars";
+import { bubbleText } from "../utils/bubbleText";
 import { usePetStore } from "../store/pet";
 import { useChatStore } from "../store/chat";
 import { useAgentStore } from "../store/agent";
 import { useThemeClass } from "../store/theme";
 import { useActivityMonitor, useActivityStore, checkAndDeliverYesterdaySummary } from "../store/activity";
 import { usePetProactivity } from "../agent/proactivity";
+import { applyTimelineConfig } from "../agent/timeline";
+import { useAutomationRunner, useAutomationStore } from "../agent/automations";
+import { recordOfferFeedback, useInitiative, type Offer } from "../agent/initiative";
 import { fetchTodayNews, formatNewsBubble, formatNewsMarkdown } from "../agent/news";
 import { getInteractionByType, getRandomInteraction, getTimeBasedGreeting } from "../utils/petInteractions";
 
@@ -34,6 +38,7 @@ const CHAT_SIZE = { width: 440, height: 560 };
 const SPRITE_SIZE = 128;
 const EDGE_PADDING = 14;
 const Pikachu3D = lazy(() => import("./Pikachu3D").then((module) => ({ default: module.Pikachu3D })));
+const MarkdownContent = lazy(() => import("./MarkdownContent").then((module) => ({ default: module.MarkdownContent })));
 const RiggedPet3D = lazy(() => import("./RiggedPet3D").then((module) => ({ default: module.RiggedPet3D })));
 
 const FREQUENCY_INTERVALS: Record<"rare" | "normal" | "frequent", number> = {
@@ -91,12 +96,8 @@ function isQuietNow(enabled: boolean, start: string, end: string) {
 }
 
 function trimBubbleText(text: string) {
-  const cleaned = text
-    .replace(/```[\s\S]*?```/g, "代码写好了，详细内容在聊天里。")
-    .replace(/[#*_`>\[\]\(\)]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return cleaned.length > 140 ? `${cleaned.slice(0, 140)}...` : cleaned;
+  // 已经是摘要（带“点我看完整回复”）的就不再截；否则按 Markdown 友好的方式截断。
+  return text.includes("点我看完整回复") ? text : bubbleText(text);
 }
 
 /**
@@ -186,6 +187,9 @@ export function Pet() {
   const [miniInput, setMiniInput] = useState("");
   const [statusText, setStatusText] = useState<string | null>(null);
   const [newsBanner, setNewsBanner] = useState<{ title: string; items: string[] } | null>(null);
+  const [offer, setOffer] = useState<Offer | null>(null);
+  const offerRef = useRef<Offer | null>(null);
+  offerRef.current = offer;
   const [routineBanner, setRoutineBanner] = useState<{ title: string; subtitle: string; items: string[] } | null>(null);
 
   const dragRef = useRef<{
@@ -551,6 +555,82 @@ export function Pet() {
     resetToDefaultState();
   }, [pauseMotion, resetToDefaultState]);
 
+  /** 以用户身份把一段指令交给桌宠执行（主动提议被接受、自动任务到点）。 */
+  const runPrompt = useCallback(
+    async (prompt: string) => {
+      if (useAgentStore.getState().isStreaming) return;
+      addMessage({ role: "user", content: prompt });
+      setPetState("thinking");
+      setEmotion("thinking");
+      await sendMessage(prompt);
+    },
+    [addMessage, sendMessage, setEmotion]
+  );
+
+  useEffect(() => {
+    // Rust 记录器每次启动都是关闭状态，由前端把设置推过去。
+    void applyTimelineConfig();
+  }, []);
+
+  useAutomationRunner({
+    runPrompt,
+    speak,
+    isBusy: () => useAgentStore.getState().isStreaming,
+  });
+
+  useInitiative({
+    enabled: true,
+    isBusy: () =>
+      showMiniChat || isDragging || showMenu || useAgentStore.getState().isStreaming || isQuietNow(quietHoursEnabled, quietStart, quietEnd),
+    hasOffer: () => Boolean(offerRef.current),
+    showOffer: (next) => {
+      setBubbleMessage(null);
+      setOffer(next);
+      setPetState("wave");
+      setEmotion("excited");
+      window.setTimeout(resetToDefaultState, 2600);
+    },
+  });
+
+  useEffect(() => {
+    if (!offer) return;
+    // 30 秒没理会就收起，不算拒绝
+    const timer = window.setTimeout(() => setOffer((current) => (current?.id === offer.id ? null : current)), 30_000);
+    return () => window.clearTimeout(timer);
+  }, [offer]);
+
+  const acceptOffer = useCallback(async () => {
+    const current = offerRef.current;
+    if (!current) return;
+    setOffer(null);
+    markHumanTouch();
+    recordOfferFeedback(current.kind, true);
+    const accept = current.accept;
+    if (accept.type === "prompt") {
+      openMiniChat();
+      await runPrompt(accept.prompt);
+    } else if (accept.type === "automation") {
+      useAutomationStore.getState().add({
+        name: accept.name,
+        time: accept.time,
+        days: accept.days,
+        action: accept.action,
+        source: "suggested",
+      });
+      speak(`好，记下了：${accept.name}，到点我自己来。在设置里随时能关。`, 6000, "wave");
+    } else {
+      speak("好嘞～", 2400, "wave");
+    }
+  }, [markHumanTouch, openMiniChat, runPrompt, speak]);
+
+  const declineOffer = useCallback(() => {
+    const current = offerRef.current;
+    if (!current) return;
+    setOffer(null);
+    markHumanTouch();
+    recordOfferFeedback(current.kind, false);
+  }, [markHumanTouch]);
+
   const sendMiniMessage = useCallback(async () => {
     const text = miniInput.trim();
     if (!text || isStreaming) return;
@@ -888,7 +968,33 @@ export function Pet() {
 
   return (
     <div className={`pet-window ${themeClass} relative h-screen w-screen select-none overflow-hidden`} onContextMenu={handleContextMenu}>
-      {!showMiniChat && bubbleMessage && (
+      {offer && !showMiniChat && (
+        <div className="offer-card absolute left-4 right-4 top-4 z-40 rounded-2xl border border-line bg-surface/95 px-4 py-3 text-fg shadow-xl backdrop-blur pointer-events-auto">
+          <div className="mb-1 flex items-center justify-between gap-3">
+            <div className="text-sm font-semibold text-fg">{offer.title}</div>
+            <div className="text-[11px] text-fg-muted">主动提议</div>
+          </div>
+          <div className="text-xs leading-relaxed text-fg/85">{offer.message}</div>
+          <div className="mt-2.5 flex justify-end gap-2">
+            {offer.accept.type !== "none" && (
+              <button
+                className="rounded-lg border border-line px-3 py-1 text-xs text-fg-muted transition-colors hover:text-fg"
+                onClick={declineOffer}
+              >
+                {offer.declineLabel || "不用了"}
+              </button>
+            )}
+            <button
+              className="rounded-lg bg-primary px-3 py-1 text-xs font-medium text-primary-fg transition-opacity hover:opacity-90"
+              onClick={acceptOffer}
+            >
+              {offer.acceptLabel || "好呀"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!showMiniChat && bubbleMessage && !offer && (
         <PetBubble
           message={bubbleMessage}
           isVisible={true}
@@ -966,20 +1072,30 @@ export function Pet() {
                 onDoubleClick={() => showMainWindow("chat")}
                 title="双击打开完整聊天"
               >
-                <span
-                  className={`inline-block max-w-[85%] rounded-2xl px-3 py-2 ${
-                    message.role === "user" ? "mini-chat-user bg-primary text-primary-fg" : "mini-chat-assistant bg-surface text-fg shadow-sm"
-                  }`}
-                >
-                  {message.content.length > 180 ? `${message.content.slice(0, 180)}...` : message.content}
-                </span>
+                {message.role === "user" ? (
+                  <span className="mini-chat-user inline-block max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-primary px-3 py-2 text-left text-primary-fg">
+                    {message.content}
+                  </span>
+                ) : (
+                  <div className="mini-chat-assistant pet-bubble-markdown inline-block max-w-[92%] break-words rounded-2xl bg-surface px-3 py-2 text-left text-fg shadow-sm">
+                    <Suspense fallback={<div className="whitespace-pre-wrap">{message.content}</div>}>
+                      <MarkdownContent content={message.content} compact />
+                    </Suspense>
+                  </div>
+                )}
               </div>
             ))}
             {isStreaming && (
               <div className="text-left text-sm">
-                <span className="mini-chat-assistant inline-block max-w-[85%] rounded-2xl bg-surface px-3 py-2 text-fg shadow-sm">
-                  {streamText || "皮卡正在思考..."}
-                </span>
+                <div className="mini-chat-assistant pet-bubble-markdown inline-block max-w-[92%] break-words rounded-2xl bg-surface px-3 py-2 text-left text-fg shadow-sm">
+                  {streamText ? (
+                    <Suspense fallback={<div className="whitespace-pre-wrap">{streamText}</div>}>
+                      <MarkdownContent content={streamText} compact />
+                    </Suspense>
+                  ) : (
+                    <span className="text-fg-muted">正在思考…</span>
+                  )}
+                </div>
               </div>
             )}
           </div>

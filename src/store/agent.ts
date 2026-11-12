@@ -11,6 +11,7 @@ import { useActivityStore } from "./activity";
 import { reduceToolRuns, subscribeToolEvents, type ToolEvent, type ToolRun } from "../agent/toolEvents";
 import { confirmSystemAction } from "../agent/tools";
 import { getActiveBotId } from "../agent/scope";
+import { bubbleText } from "../utils/bubbleText";
 
 interface AgentState {
   isStreaming: boolean;
@@ -29,13 +30,9 @@ let activeController: AbortController | null = null;
 /** 发给模型的历史条数上限；不设上限时长对话会超出上下文窗口直接报错。 */
 const MAX_HISTORY_MESSAGES = 40;
 
+/** 发给桌宠气泡的摘要：保留 Markdown，表格 / 代码换成提示，按行截断。 */
 function summarizeForBubble(text: string) {
-  const cleaned = text
-    .replace(/```[\s\S]*?```/g, "我写好了一段代码，详细内容在聊天窗口里。")
-    .replace(/[#*_`>\[\]\(\)]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return cleaned.length > 140 ? `${cleaned.slice(0, 140)}...` : cleaned;
+  return bubbleText(text);
 }
 
 async function notifyPet(event: string, payload?: Record<string, unknown>) {

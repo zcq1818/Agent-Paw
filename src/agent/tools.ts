@@ -765,12 +765,14 @@ const systemTools: Tool[] = [
 const activityTools: Tool[] = [
   {
     name: "get_activity_summary",
-    description: "读取本地活动观察摘要，分析用户最近在电脑上使用了哪些应用。只在用户开启本地活动观察后有数据。",
+    description: "读取今天的电脑活动摘要（软件使用时长、专注度、打开的文件、复制内容）。查其它日期或搜索具体记录用 timeline_day_report / timeline_search。",
     parameters: { type: "object", properties: {} },
     execute: async () => {
       const state = useActivityStore.getState();
-      if (!state.enabled) return "本地活动观察未开启。请到设置 -> AI 功能 -> 本地活动观察 开启。";
-      return state.getSummary();
+      if (!state.enabled) return "本地活动观察未开启。请到设置 -> AI 能力 -> 本地活动观察 开启。";
+      const { dayReport } = await import("./timeline");
+      const report = await dayReport("today");
+      return [report, "---", state.getSummary()].join("\n\n");
     },
   },
   {
