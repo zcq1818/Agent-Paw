@@ -112,8 +112,24 @@ const ttsTools: Tool[] = [
     description: "列出可用语音",
     parameters: { type: "object", properties: {} },
     execute: async () => {
-      const voices = getVoices();
-      if (voices.length === 0) return "正在加载语音列表...";
+      let voices = getVoices();
+      const synth = getSpeechSynthesis();
+      if (voices.length === 0 && synth) {
+        // 语音列表是异步加载的，第一次读取常常为空，等 voiceschanged（最多 3 秒）。
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, 3000);
+          synth.addEventListener(
+            "voiceschanged",
+            () => {
+              clearTimeout(timer);
+              resolve();
+            },
+            { once: true }
+          );
+        });
+        voices = getVoices();
+      }
+      if (voices.length === 0) return "系统没有可用的语音（可在 Windows 设置 → 时间和语言 → 语音 中安装）。";
       return `可用语音：\n${voices.slice(0, 10).map((voice) => `${voice.name} (${voice.lang})`).join("\n")}`;
     },
   },

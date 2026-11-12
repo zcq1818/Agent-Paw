@@ -103,12 +103,12 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: "https://spark-api-open.xf-yun.com/v1",
     model: "lite",
     stream: true,
-    enableTools: false,
+    enableTools: true,
     temperature: 0.7,
     maxTokens: 4096,
     apiKeyPlaceholder: "控制台 HTTP 服务接口认证信息里的 APIPassword",
     notes:
-      "API Key 填讯飞控制台“HTTP 服务接口认证信息”里的 APIPassword（不是 APIKey / APISecret）。模型名：lite、generalv3、pro-128k、generalv3.5、max-32k、4.0Ultra；X1 模型改用 Base URL https://spark-api-open.xf-yun.com/v2、模型名 x1。只有 max / 4.0Ultra 等支持工具调用。",
+      "API Key 填讯飞控制台“HTTP 服务接口认证信息”里的 APIPassword（不是 APIKey / APISecret）。模型名：lite、generalv3、pro-128k、generalv3.5、max-32k、4.0Ultra；X1 模型改用 Base URL https://spark-api-open.xf-yun.com/v2、模型名 x1。只有 max / 4.0Ultra 等支持工具调用（不支持时会自动改为不带工具重试）。",
   },
   {
     id: "xfyun-maas",
@@ -116,7 +116,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: "https://maas-api.cn-huabei-1.xf-yun.com/v1",
     model: "xdeepseekv3",
     stream: true,
-    enableTools: false,
+    enableTools: true,
     temperature: 0.7,
     maxTokens: 4096,
     apiKeyPlaceholder: "星辰 MaaS 控制台的 API Key",
@@ -172,12 +172,19 @@ export function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, "");
 }
 
-export function normalizeConfig(config: Partial<AgentConfig>): AgentConfig {
+/** 预设里只用于界面展示的字段，不能混进实际配置（否则切换服务商后会残留旧预设的说明）。 */
+function stripPresetMeta<T extends object>(value: T): T {
+  const { id: _id, label: _label, apiKeyPlaceholder: _placeholder, notes: _notes, ...rest } = value as any;
+  return rest as T;
+}
+
+export function normalizeConfig(input: Partial<AgentConfig>): AgentConfig {
+  const config = stripPresetMeta(input);
   const provider = config.provider || DEFAULT_CONFIG.provider;
   const preset = getProviderPreset(provider);
   return {
     ...DEFAULT_CONFIG,
-    ...preset,
+    ...stripPresetMeta(preset),
     ...config,
     provider,
     providerLabel: config.providerLabel || preset.label,
@@ -392,7 +399,7 @@ Agent 行为准则：
 - 当用户说“以后都这样”“记住”“下次自动”时，主动保存为本地记忆。
 - 当发现用户反复提出同一类任务时，可以建议或创建一个自定义 Skill。
 - 新闻、提醒、简报可以用宠物气泡短句播报，但详细内容放在聊天窗口。
-- 打开应用、系统动作、网页跳转等外部动作执行前必须确认。`;
+- 打开应用、系统动作、网页跳转等外部动作：用户提出时直接调用对应工具，应用会弹出确认卡片让用户批准，不要先用文字再问一遍；用户拒绝后不要重试。`;
 
   if (config.enablePersonality !== false) {
     prompt += personalityStore.getPersonalizedContext();
@@ -401,6 +408,17 @@ Agent 行为准则：
   const activeBot = getActiveBot(useBotStore.getState());
   if (activeBot) {
     prompt += `\n\n## 当前 Bot 身份\n你现在的身份是「${activeBot.name}」${activeBot.tagline ? `（${activeBot.tagline}）` : ""}。\n${activeBot.instructions || "沿用上方默认人设与行为准则。"}\n权限级别：${activeBot.approvalLevel}。当 Bot 指令与上方默认人设冲突时，以本节 Bot 指令为准。`;
+  }
+
+  if (config.enableTools === false) {
+    prompt += `
+
+## 工具状态
+当前模型配置没有开启「工具调用」，你无法执行任何工具。
+- 不要输出 <tool_call>、函数调用 JSON 等调用文本。
+- 不要声称已经添加、删除、搜索、打开或保存了任何东西。
+- 用户需要这类操作时，说明需要在「设置 → 模型」里打开「工具调用」，或给出用户可以自己操作的步骤。`;
+    return prompt;
   }
 
   prompt += `

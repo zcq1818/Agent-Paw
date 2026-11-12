@@ -513,6 +513,19 @@ const clipboardTools: Tool[] = [
   },
 ];
 
+/** 按 ID 或名称找技能：模型通常只记得名字，拿不到 ID。 */
+function findCustomSkill(ref: unknown) {
+  const key = String(ref || "").trim();
+  if (!key) return undefined;
+  const skills = customSkillsStore.getAll();
+  return (
+    skills.find((skill) => skill.id === key) ||
+    skills.find((skill) => skill.name === key) ||
+    skills.find((skill) => skill.name.toLowerCase() === key.toLowerCase()) ||
+    skills.find((skill) => skill.name.includes(key) || key.includes(skill.name))
+  );
+}
+
 const customSkillTools: Tool[] = [
   {
     name: "list_custom_skills",
@@ -526,7 +539,9 @@ const customSkillTools: Tool[] = [
     execute: async (args) => {
       const skills = args.filter === "active" ? customSkillsStore.getActive() : customSkillsStore.getAll();
       if (skills.length === 0) return "暂无自定义技能";
-      return skills.map((skill) => `${skill.active ? "[启用]" : "[停用]"} ${skill.name}: ${skill.description}`).join("\n");
+      return skills
+        .map((skill) => `${skill.active ? "[启用]" : "[停用]"} ${skill.name}（ID: ${skill.id}）：${skill.description}`)
+        .join("\n");
     },
   },
   {
@@ -559,33 +574,41 @@ const customSkillTools: Tool[] = [
   },
   {
     name: "toggle_custom_skill",
-    description: "启用或停用自定义技能",
+    description: "启用或停用自定义技能（可传技能 ID 或名称）",
     parameters: {
       type: "object",
       properties: {
-        id: { type: "string", description: "技能 ID" },
+        id: { type: "string", description: "技能 ID 或技能名称" },
+        active: { type: "boolean", description: "true=启用，false=停用；不传则切换当前状态" },
       },
       required: ["id"],
     },
     execute: async (args) => {
-      const skill = customSkillsStore.toggleActive(args.id as string);
+      const found = findCustomSkill(args.id);
+      if (!found) return `未找到技能「${String(args.id || "")}」，可先用 list_custom_skills 查看名称和 ID。`;
+      const skill =
+        typeof args.active === "boolean" && found.active === args.active
+          ? found
+          : customSkillsStore.toggleActive(found.id);
       if (!skill) return "未找到该技能";
       return skill.active ? `已启用技能：${skill.name}` : `已停用技能：${skill.name}`;
     },
   },
   {
     name: "delete_custom_skill",
-    description: "删除自定义技能",
+    description: "删除自定义技能（可传技能 ID 或名称）",
     parameters: {
       type: "object",
       properties: {
-        id: { type: "string", description: "技能 ID" },
+        id: { type: "string", description: "技能 ID 或技能名称" },
       },
       required: ["id"],
     },
     execute: async (args) => {
-      const success = customSkillsStore.delete(args.id as string);
-      return success ? "已删除自定义技能" : "未找到该技能";
+      const found = findCustomSkill(args.id);
+      if (!found) return `未找到技能「${String(args.id || "")}」，可先用 list_custom_skills 查看名称和 ID。`;
+      customSkillsStore.delete(found.id);
+      return `已删除自定义技能：${found.name}`;
     },
   },
 ];
