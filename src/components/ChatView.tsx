@@ -1,3 +1,4 @@
+import { toolActionLabel } from "../agent/toolEvents";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { emit } from "@tauri-apps/api/event";
 import {
@@ -336,7 +337,7 @@ export function ChatView({ onOpenSidebar, onOpenSettings }: ChatViewProps) {
             <div className="flex items-center gap-2 px-3 pb-2.5 pt-1">
               <span className="min-w-0 flex-1 truncate pl-1 text-xs text-fg-muted">
                 {isStreaming
-                  ? `${runningToolName ? `正在调用 ${runningToolName}…` : "正在生成…"} 可以继续输入补充，Enter 发送`
+                  ? `${runningToolName ? `正在${toolActionLabel(runningToolName)}…` : "正在生成…"} 可以继续输入补充，Enter 发送`
                   : "Enter 发送 · Shift + Enter 换行"}
               </span>
               {isStreaming && (

@@ -10,6 +10,7 @@ import {
   useBotStore,
   type ApprovalLevel,
   type BotModelOverride,
+  type BotProfile,
   type BotRole,
 } from "../store/bots";
 
@@ -136,6 +137,20 @@ export function BotRoster({ onClose }: BotRosterProps) {
     setSelectedId(id);
   };
 
+  // 还没加入团队的角色模板（同角色已在团队里就不再推荐）
+  const suggestions = ROLE_PRESETS.filter(
+    (preset) => preset.role !== "chief" && !visibleBots.some((bot) => bot.role === preset.role)
+  );
+
+  const addSuggestion = (role: BotRole) => {
+    const id = createBotFromRole(role, { activate: false });
+    if (id) setSelectedId(id);
+  };
+
+  const addAllSuggestions = () => {
+    suggestions.forEach((preset) => createBotFromRole(preset.role, { activate: false }));
+  };
+
   const handleCreate = () => {
     const preset = ROLE_PRESETS.find((item) => item.role === newRole);
     const name = newName.trim();
@@ -145,6 +160,8 @@ export function BotRoster({ onClose }: BotRosterProps) {
             name,
             role: preset.role,
             avatar: preset.avatar,
+            petAvatar: preset.petAvatar,
+            petSkin: preset.petSkin,
             tagline: preset.tagline,
             instructions: preset.instructions,
             skills: [...preset.skills],
@@ -223,6 +240,41 @@ export function BotRoster({ onClose }: BotRosterProps) {
               </button>
             ))}
           </div>
+
+          {suggestions.length > 0 && (
+            <div className="mt-4 space-y-1.5 rounded-xl border border-gray-700 ui-panel p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold ui-muted">推荐成员</span>
+                <button
+                  type="button"
+                  onClick={addAllSuggestions}
+                  className="text-xs text-yellow-300 hover:underline"
+                  title="把下面的成员都加进团队，不会切换当前 Bot"
+                >
+                  全部加入
+                </button>
+              </div>
+              {suggestions.map((preset) => (
+                <div key={preset.role} className="flex items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-gray-800">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gray-700">
+                    <BotAvatar bot={{ ...preset, id: preset.role } as unknown as BotProfile} size={26} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm">{preset.name}</span>
+                    <span className="block truncate text-xs ui-muted">{preset.tagline}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => addSuggestion(preset.role)}
+                    className="shrink-0 rounded-md border border-yellow-500/60 px-2 py-0.5 text-xs text-yellow-300 hover:bg-yellow-500/15"
+                    aria-label={`把${preset.name}加入团队`}
+                  >
+                    加入
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto p-4">

@@ -61,6 +61,16 @@ export const DEFAULT_EXPERTS: Expert[] = [
     allowedTools: "Read",
     enabled: false,
   },
+  {
+    id: "codebuddy-local",
+    name: "CodeBuddy 本机",
+    role: "本机 CodeBuddy Code（复用登录态，免 API Key）",
+    provider: "codebuddy-local",
+    model: "",
+    baseUrl: "",
+    apiKey: "",
+    enabled: false,
+  },
 ];
 
 function cloneDefaults(): Expert[] {
@@ -122,6 +132,7 @@ export function getAvailableExperts(experts: Expert[]): Expert[] {
       expert.enabled &&
       (expert.apiKey.trim() ||
         expert.provider === "custom" ||
-        expert.provider === "claude-local")
+        expert.provider === "claude-local" ||
+        expert.provider === "codebuddy-local")
   );
 }

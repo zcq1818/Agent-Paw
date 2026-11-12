@@ -60,6 +60,7 @@ import { useActivityStore } from "../store/activity";
 import { DEFAULT_CHAT_HOTKEY, normalizeHotkey, useShortcutStore } from "../store/shortcut";
 import { CustomSkillsSettings } from "./CustomSkillsSettings";
 import { AlwaysAllowList, InitiativeCard, TimelineOptions } from "./AssistantSettings";
+import { McpServersCard } from "./McpSettings";
 import { useAvatarOptions } from "../store/petAvatars";
 import type { ComputerControlMode } from "../agent/computer";
 import { CLAUDE_MODEL_OPTIONS, CODEBUDDY_MODEL_OPTIONS, LOCAL_AGENT_LABELS, localAgentOf } from "../agent/claudeLocal";
@@ -719,6 +720,8 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
                 )}
                 <AlwaysAllowList />
               </Card>
+
+              <McpServersCard />
 
               <Card
                 title="本地活动观察"

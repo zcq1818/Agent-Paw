@@ -84,8 +84,15 @@ export async function callExpert(expert: Expert, prompt: string, signal?: AbortS
     return callLocalClaude(prompt, expert.command, expert.allowedTools || "Read");
   }
 
-  const config = expertConfig(expert);
   const system = `你是「${expert.name}」，桌面宠物大总管委派的专家，职责：${expert.role}。只完成本次子任务，用中文与 Markdown，简洁准确，不要假装执行过本地操作。`;
+
+  // 本机 CodeBuddy Code：同样复用用户自己的登录，不需要 API Key。
+  if (expert.provider === "codebuddy-local") {
+    const { askClaudeLocal } = await import("./claudeLocal");
+    return askClaudeLocal(system, prompt, { agent: "codebuddy", model: expert.model || undefined, signal });
+  }
+
+  const config = expertConfig(expert);
 
   if (isAnthropicProvider(config)) {
     if (!config.apiKey) throw new Error("未配置 Anthropic API Key");

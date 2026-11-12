@@ -16,6 +16,14 @@ const EMOJI_FALLBACK: Record<string, string> = {
   research: "🔎",
   ops: "📋",
   review: "🧐",
+  writer: "✍️",
+  translator: "🌐",
+  analyst: "📊",
+  product: "🧭",
+  tester: "🧪",
+  designer: "🎨",
+  tutor: "📚",
+  life: "🏡",
   custom: "🐾",
 };
 

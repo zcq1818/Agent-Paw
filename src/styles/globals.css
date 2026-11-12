@@ -703,3 +703,28 @@ textarea.input {
 ::-webkit-scrollbar-thumb:hover {
   background: #fff09a;
 }
+
+/* 桌宠小聊天框：流式回复的光标紧跟在最后一个字后面，而不是另起一行 */
+.mini-streaming > :last-child::after,
+.mini-streaming > ul:last-child > li:last-child::after,
+.mini-streaming > ol:last-child > li:last-child::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: rgb(var(--primary));
+  animation: streamCaret 1s steps(1, end) infinite;
+}
+.mini-streaming > ul:last-child::after,
+.mini-streaming > ol:last-child::after,
+.mini-streaming > table:last-child::after,
+.mini-streaming > pre:last-child::after {
+  content: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mini-streaming > :last-child::after,
+  .mini-streaming > ul:last-child > li:last-child::after,
+  .mini-streaming > ol:last-child > li:last-child::after { animation: none; }
+}

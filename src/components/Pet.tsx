@@ -24,6 +24,7 @@ import { useAutomationRunner, useAutomationStore } from "../agent/automations";
 import { recordOfferFeedback, useInitiative, type Offer } from "../agent/initiative";
 import { fetchTodayNews, formatNewsBubble, formatNewsMarkdown } from "../agent/news";
 import { getInteractionByType, getRandomInteraction, getTimeBasedGreeting } from "../utils/petInteractions";
+import { toolActionLabel, type ToolRun } from "../agent/toolEvents";
 
 type PetState = "idle" | "walk" | "sit" | "sleep" | "excited" | "thinking" | "morning" | "night" | "dance" | "stretch" | "look" | "wave";
 type Facing = "left" | "right";
@@ -98,6 +99,75 @@ function isQuietNow(enabled: boolean, start: string, end: string) {
 function trimBubbleText(text: string) {
   // 已经是摘要（带“点我看完整回复”）的就不再截；否则按 Markdown 友好的方式截断。
   return text.includes("点我看完整回复") ? text : bubbleText(text);
+}
+
+/** 小聊天框里正在生成的那条回复：没出字时跳动的点 + 当前在做什么；出字后带闪烁光标。 */
+function MiniStreamingReply({ text, runs }: { text: string; runs: ToolRun[] }) {
+  const pending = runs.find((run) => run.status === "pending");
+  const running = [...runs].reverse().find((run) => run.status === "running");
+  const finished = runs.filter((run) => run.status === "done" || run.status === "error");
+  const status = pending
+    ? "等你确认…"
+    : running
+      ? `正在${toolActionLabel(running.name)}…`
+      : finished.length
+        ? "整理结果…"
+        : "正在思考…";
+
+  return (
+    <div className="mini-chat-reply fade-in text-left text-sm">
+      {runs.length > 0 && (
+        <div className="mb-1 flex flex-wrap gap-1">
+          {runs.slice(-4).map((run) => (
+            <span
+              key={run.id}
+              className="inline-flex items-center gap-1 rounded-full border border-line bg-surface px-2 py-0.5 text-[11px] text-fg-muted"
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  run.status === "done"
+                    ? "bg-success"
+                    : run.status === "error"
+                      ? "bg-danger"
+                      : run.status === "pending"
+                        ? "animate-pulse bg-accent"
+                        : "animate-pulse bg-primary"
+                }`}
+              />
+              {run.name === "审批"
+                ? run.status === "pending"
+                  ? "等你确认"
+                  : run.status === "done"
+                    ? "已确认"
+                    : "没确认"
+                : toolActionLabel(run.name)}
+            </span>
+          ))}
+        </div>
+      )}
+      <div
+        className={`mini-chat-assistant pet-bubble-markdown inline-block max-w-[92%] break-words rounded-2xl bg-surface px-3 py-2 text-left text-fg shadow-sm ${
+          text ? "mini-streaming" : ""
+        }`}
+      >
+        {text ? (
+          <Suspense fallback={<div className="whitespace-pre-wrap">{text}</div>}>
+            <MarkdownContent content={text} compact />
+          </Suspense>
+        ) : (
+          <span className="flex items-center gap-2 text-fg-muted">
+            <span className="typing-dots" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+            <span className="text-xs">{status}</span>
+          </span>
+        )}
+      </div>
+      {text && (running || pending) && <div className="mt-1 text-[11px] text-fg-muted">{status}</div>}
+    </div>
+  );
 }
 
 /**
@@ -237,6 +307,7 @@ export function Pet() {
   const sendMessage = useAgentStore((state) => state.sendMessage);
   const isStreaming = useAgentStore((state) => state.isStreaming);
   const streamText = useAgentStore((state) => state.streamText);
+  const currentToolRuns = useAgentStore((state) => state.currentToolRuns);
   const recordTyping = useActivityStore((state) => state.recordTyping);
 
   const pauseMotion = useCallback((ms = 1800) => {
@@ -651,7 +722,7 @@ export function Pet() {
     requestAnimationFrame(() => {
       container.scrollTo({ top: container.scrollHeight, behavior });
     });
-  }, [showMiniChat, messages.length, streamText, isStreaming]);
+  }, [showMiniChat, messages.length, streamText, isStreaming, currentToolRuns.length]);
 
   useEffect(() => {
     const timer = window.setInterval(refreshTimeOfDay, 60_000);
@@ -1065,19 +1136,7 @@ export function Pet() {
                 )}
               </div>
             ))}
-            {isStreaming && (
-              <div className="text-left text-sm">
-                <div className="mini-chat-assistant pet-bubble-markdown inline-block max-w-[92%] break-words rounded-2xl bg-surface px-3 py-2 text-left text-fg shadow-sm">
-                  {streamText ? (
-                    <Suspense fallback={<div className="whitespace-pre-wrap">{streamText}</div>}>
-                      <MarkdownContent content={streamText} compact />
-                    </Suspense>
-                  ) : (
-                    <span className="text-fg-muted">正在思考…</span>
-                  )}
-                </div>
-              </div>
-            )}
+            {isStreaming && <MiniStreamingReply text={streamText} runs={currentToolRuns} />}
           </div>
           <div className="mt-2 flex gap-2">
             <input

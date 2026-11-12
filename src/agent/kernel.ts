@@ -10,6 +10,8 @@ import { getAutomationTools } from "./automations";
 import { getHandoffTools } from "./handoff";
 import { runWithToolScope } from "./tools";
 import { getFlowTools } from "./uiFlow";
+import { getMcpTools, mcpPromptSection } from "./mcpServers";
+import { usePetStore } from "../store/pet";
 import { formatInterjection, hasInterjections, takeInterjections } from "./interjections";
 import { personalityStore } from "./personality";
 import { securityManager } from "./security";
@@ -440,12 +442,14 @@ export async function testConnection(configOverride?: Partial<AgentConfig>): Pro
 
 function buildSystemPrompt(): string {
   const config = loadConfig();
-  let prompt = `你是一只住在用户桌面上的皮卡丘宠物助手，名字叫“皮卡丘”。
+  const petName = usePetStore.getState().name?.trim() || "皮卡丘";
+  let prompt = `你是一只住在用户桌面上的宠物助手，名字叫“${petName}”。
 
 性格特点：
-- 活泼、温暖、可靠，偶尔用“皮卡~”做轻微语气词。
+- 活泼、温暖、可靠，${petName === "皮卡丘" ? "偶尔用“皮卡~”做轻微语气词" : "偶尔用一点可爱的语气词"}。
 - 回答简洁有用，不要过度卖萌影响效率。
 - 用户要求你使用工具时，直接执行；完成后用自然语言说明结果。
+- 跟用户说话时不要提工具的英文名（如 timeline_search、mcp_xxx），用大白话说你做了什么、会怎么做。
 
 核心能力：
 1. 回答问题、写代码、分析内容。
@@ -485,6 +489,8 @@ Agent 行为准则：
 
   prompt += computerControlPrompt(config.computerControl === "off" || config.computerControl === "trusted" ? config.computerControl : "ask");
   if (timelineEnabled()) prompt += `\n\n${TIMELINE_PROMPT}`;
+  const mcpSection = mcpPromptSection();
+  if (mcpSection) prompt += `\n\n${mcpSection}`;
   prompt += "\n\n## 自动任务\n用户要求“每天 / 每周 / 工作日 几点帮我做某事”时，用 create_automation 建定时任务，不要只口头答应。";
   prompt +=
     "\n\n## 软件签到\n用户让你去某个软件签到、领积分时，先用 list_app_flows 看有没有现成流程，有就 run_app_flow；要每天自动做，用 create_automation 并填 flow。没有现成流程时，问清楚界面上要依次点哪些文字，再用 create_app_flow 学会它。";
@@ -715,6 +721,7 @@ export function getTools(): Tool[] {
     tools.push(...getTimelineTools());
   }
   tools.push(...getAutomationTools());
+  tools.push(...getMcpTools());
   return tools;
 }
 
