@@ -422,7 +422,8 @@ export function Pet() {
         const awayX = centerOfWindow(current).x < cursor.x ? -260 : 140;
         const awayY = centerOfWindow(current).y < cursor.y ? -180 : 120;
         target = { x: current.x + awayX + rand(-60, 60), y: current.y + awayY + rand(-60, 60) };
-      } else if (!avoidCursor && (action > 0.72 || gap < 380)) {
+      } else if (!avoidCursor && roamScope === "full" && (action > 0.72 || gap < 380)) {
+        // 只有“全屏活动 + 不避开鼠标”时才凑到鼠标旁边，否则会跑出“附近 / 角落”的范围。
         const offsetX = rand(-petPx.width * 0.75, petPx.width * 0.75);
         const offsetY = rand(70, petPx.height * 0.95);
         target = { x: cursor.x + offsetX, y: cursor.y + offsetY };
@@ -448,7 +449,15 @@ export function Pet() {
       } else if (gap < 180 && Math.random() < 0.22) {
         setPetState("thinking");
         window.setTimeout(resetToDefaultState, 1600);
-      } else if (gap > 760 && Math.random() < 0.08) {
+      } else if (avoidCursor && gap < 240 && Math.random() < 0.35) {
+        // 避开鼠标：鼠标靠近（但还没碰到）时往反方向挪一点。
+        const away = {
+          x: position.x + (center.x < cursor.x ? -220 : 220) + rand(-40, 40),
+          y: position.y + (center.y < cursor.y ? -140 : 140) + rand(-40, 40),
+        };
+        await moveTo(away, "cursor", force);
+      } else if (!avoidCursor && roamScope === "full" && gap > 760 && Math.random() < 0.08) {
+        // 不避开鼠标且全屏活动时，偶尔跑到鼠标附近；其它设置下不追鼠标。
         const target = {
           x: cursor.x + rand(-160, 80),
           y: cursor.y + rand(80, 220),
@@ -458,7 +467,7 @@ export function Pet() {
     } catch {
       // Browser dev fallback.
     }
-  }, [autoAction, moveTo, resetToDefaultState, shouldPauseMotion, speak]);
+  }, [autoAction, avoidCursor, moveTo, resetToDefaultState, roamScope, shouldPauseMotion, speak]);
 
   const triggerRandomInteraction = useCallback((force = false) => {
     if (!enableInteractions || (!force && shouldPauseMotion())) return;
