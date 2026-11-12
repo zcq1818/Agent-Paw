@@ -17,7 +17,8 @@ import { confirmSystemAction, type Tool } from "./tools";
 
 export type AutomationAction =
   | { type: "open"; target: string; label?: string }
-  | { type: "agent"; prompt: string };
+  | { type: "agent"; prompt: string }
+  | { type: "flow"; flowId: string; label?: string };
 
 export interface Automation {
   id: string;
@@ -90,7 +91,12 @@ export function describeDays(days: number[]) {
 }
 
 export function describeAutomation(item: Automation) {
-  const what = item.action.type === "open" ? `打开 ${item.action.label || item.action.target}` : item.action.prompt;
+  const what =
+    item.action.type === "open"
+      ? `打开 ${item.action.label || item.action.target}`
+      : item.action.type === "flow"
+        ? `执行「${item.action.label || item.action.flowId}」`
+        : item.action.prompt;
   return `${describeDays(item.days)} ${item.time}：${what}`;
 }
 
@@ -155,12 +161,14 @@ interface RunnerOptions {
   runPrompt: (prompt: string) => Promise<void> | void;
   speak: (message: string, duration?: number) => void;
   isBusy: () => boolean;
+  /** 把执行结果记到聊天里（流程类任务用） */
+  report?: (markdown: string) => void;
 }
 
 /** 桌宠窗口里挂一个调度器。 */
-export function useAutomationRunner({ runPrompt, speak, isBusy }: RunnerOptions) {
-  const optionsRef = useRef({ runPrompt, speak, isBusy });
-  optionsRef.current = { runPrompt, speak, isBusy };
+export function useAutomationRunner({ runPrompt, speak, isBusy, report }: RunnerOptions) {
+  const optionsRef = useRef<RunnerOptions>({ runPrompt, speak, isBusy, report });
+  optionsRef.current = { runPrompt, speak, isBusy, report };
 
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
@@ -182,6 +190,18 @@ export function useAutomationRunner({ runPrompt, speak, isBusy }: RunnerOptions)
           } catch (error) {
             optionsRef.current.speak(`自动任务「${item.name}」没打开：${error}`, 6500);
           }
+        } else if (item.action.type === "flow") {
+          // 软件操作流程（签到、领积分）：不用大模型，按固定步骤点
+          const { findFlow, runFlow } = await import("./uiFlow");
+          const flow = findFlow(item.action.flowId);
+          if (!flow) {
+            optionsRef.current.speak(`自动任务「${item.name}」要用的流程找不到了。`, 6000);
+            continue;
+          }
+          optionsRef.current.speak(`到点了，我去做「${flow.name}」。`, 3600);
+          const result = await runFlow(flow);
+          optionsRef.current.speak(`${flow.name}：${result.summary}`, 8000);
+          optionsRef.current.report?.(`### 自动任务：${flow.name}\n\n${result.ok ? "✅" : "⚠️"} ${result.summary}\n\n${result.log.map((l) => `- ${l}`).join("\n")}`);
         } else {
           optionsRef.current.speak(`到点了，我开始做「${item.name}」。`, 4200);
           try {
@@ -213,8 +233,9 @@ export function getAutomationTools(): Tool[] {
           name: { type: "string", description: "任务名，简短，如“打开邮箱”" },
           time: { type: "string", description: "执行时间 HH:MM，24 小时制" },
           days: { type: "string", description: "每天 / 工作日 / 周末 / 周一,周五；默认每天" },
-          open_target: { type: "string", description: "直接打开的软件名、exe 路径、文件路径或网址（与 prompt 二选一）" },
-          prompt: { type: "string", description: "到点后交给桌宠执行的完整指令（与 open_target 二选一）" },
+          open_target: { type: "string", description: "直接打开的软件名、exe 路径、文件路径或网址（三选一）" },
+          flow: { type: "string", description: "要执行的软件操作流程 ID（如 workbuddy-checkin，见 list_app_flows；签到类任务用这个，三选一）" },
+          prompt: { type: "string", description: "到点后交给桌宠执行的完整指令（三选一）" },
         },
         required: ["name", "time"],
       },
@@ -223,9 +244,18 @@ export function getAutomationTools(): Tool[] {
         if (!time) return "时间格式不对，请用 HH:MM，例如 09:00。";
         const target = String(args.open_target || "").trim();
         const prompt = String(args.prompt || "").trim();
-        if (!target && !prompt) return "需要 open_target 或 prompt 其中一个。";
+        const flowRef = String(args.flow || "").trim();
+        if (!target && !prompt && !flowRef) return "需要 open_target、flow 或 prompt 其中一个。";
+        let action: AutomationAction;
+        if (flowRef) {
+          const { findFlow } = await import("./uiFlow");
+          const flow = findFlow(flowRef);
+          if (!flow) return `没有找到流程「${flowRef}」，先用 list_app_flows 看看有哪些。`;
+          action = { type: "flow", flowId: flow.id, label: flow.name };
+        } else {
+          action = target ? { type: "open", target } : { type: "agent", prompt };
+        }
         const days = parseDays(args.days);
-        const action: AutomationAction = target ? { type: "open", target } : { type: "agent", prompt };
         const preview = describeAutomation({
           id: "",
           name: String(args.name),

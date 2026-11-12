@@ -6,6 +6,7 @@ use serde::Serialize;
 mod ai_apps;
 mod claude_code;
 mod control;
+mod ocr;
 mod timeline;
 mod tray;
 
@@ -435,7 +436,8 @@ pub fn run() {
             claude_code::check_codebuddy,
             ai_apps::ai_apps,
             ai_apps::open_in_trae,
-            ai_apps::open_workbuddy
+            ai_apps::open_workbuddy,
+            ocr::ocr_window
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
