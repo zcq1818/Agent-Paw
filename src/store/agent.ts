@@ -12,6 +12,7 @@ import { reduceToolRuns, subscribeToolEvents, type ToolEvent, type ToolRun } fro
 import { confirmSystemAction } from "../agent/tools";
 import { getActiveBotId } from "../agent/scope";
 import { bubbleText } from "../utils/bubbleText";
+import { clearInterjections, pushInterjection, takeInterjections } from "../agent/interjections";
 
 interface AgentState {
   isStreaming: boolean;
@@ -19,7 +20,9 @@ interface AgentState {
   error: string | null;
   /** 本次回复期间实时累积的工具调用，供流式气泡展示。 */
   currentToolRuns: ToolRun[];
-  sendMessage: (text: string) => Promise<void>;
+  sendMessage: (text: string, options?: { followUp?: boolean }) => Promise<void>;
+  /** 运行中插话：消息先显示出来，模型在下一轮（或这次回复结束后）处理。 */
+  interject: (text: string) => void;
   stopGeneration: () => void;
   retryLast: () => Promise<void>;
   continueLast: () => Promise<void>;
@@ -248,8 +251,9 @@ export const useAgentStore = create<AgentState>((set) => ({
   error: null,
   currentToolRuns: [],
 
-  sendMessage: async (text: string) => {
+  sendMessage: async (text: string, sendOptions?: { followUp?: boolean }) => {
     activeController?.abort();
+    if (!sendOptions?.followUp) clearInterjections();
     // 用局部变量持有本次的 controller：如果上一轮还没结束，它的 finally
     // 不能把这一轮的 controller 清空、也不能把 isStreaming 置回 false。
     const controller = new AbortController();
@@ -261,7 +265,19 @@ export const useAgentStore = create<AgentState>((set) => ({
     const target = { botId: getActiveBotId(), conversationId: useChatStore.getState().activeConversationId };
     const addMessage = (msg: Parameters<ReturnType<typeof useChatStore.getState>["addMessage"]>[0]) =>
       useChatStore.getState().addMessageTo(target, msg);
-    const messages = useChatStore.getState().messages;
+    let messages = useChatStore.getState().messages;
+    if (sendOptions?.followUp) {
+      // 插话已经显示在上一条回复之前；作为新一轮发送时挪到最后，模型才知道这是现在要回应的话
+      const parts = new Set(text.split("\n").map((line) => line.trim()));
+      const kept = [...messages];
+      for (let i = kept.length - 1; i >= 0 && parts.size; i -= 1) {
+        if (kept[i].role === "user" && parts.has(kept[i].content.trim())) {
+          parts.delete(kept[i].content.trim());
+          kept.splice(i, 1);
+        }
+      }
+      messages = [...kept, { ...messages[messages.length - 1], role: "user", content: text }];
+    }
     const history = messages
       .filter((message) => message.content.trim())
       .slice(-MAX_HISTORY_MESSAGES)
@@ -349,6 +365,8 @@ export const useAgentStore = create<AgentState>((set) => ({
       // Tauri HTTP 插件取消请求时抛出的是字符串 "Request cancelled"，不是 AbortError，
       // 所以以 signal 状态为准判断是不是用户点了停止。
       if (controller.signal.aborted || (err instanceof DOMException && err.name === "AbortError")) {
+        // 用户点了停止：还没处理的插话也一起作废
+        if (activeController === controller) clearInterjections();
         const partial = useAgentStore.getState().streamText.trim();
         if (partial) addMessage({ role: "assistant", content: `${partial}\n\n[已停止]`, toolRuns });
         set({ streamText: "", error: null, currentToolRuns: [] });
@@ -366,7 +384,25 @@ export const useAgentStore = create<AgentState>((set) => ({
       if (activeController === controller) {
         activeController = null;
         set({ isStreaming: false, currentToolRuns: [] });
+        // 这一轮没来得及处理的插话（本机智能体、或者刚好在结束时发的）：接着发一轮
+        const leftover = controller.signal.aborted ? [] : takeInterjections();
+        if (leftover.length) {
+          window.setTimeout(() => {
+            void useAgentStore.getState().sendMessage(leftover.join("\n"), { followUp: true });
+          }, 50);
+        }
       }
+    }
+  },
+
+  interject: (text: string) => {
+    const value = text.trim();
+    if (!value) return;
+    useChatStore.getState().addMessage({ role: "user", content: value });
+    if (useAgentStore.getState().isStreaming) {
+      pushInterjection(value);
+    } else {
+      void useAgentStore.getState().sendMessage(value);
     }
   },
 

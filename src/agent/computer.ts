@@ -62,7 +62,8 @@ async function allow(summary: string, options: { dangerous?: boolean; kind?: "sh
   if (mode === "off") return false;
   if (mode === "trusted" && !options.dangerous) return true;
   const prefix = options.dangerous ? "⚠️ 高风险操作，请仔细确认\n" : "";
-  return confirmSystemAction(`${prefix}${summary}`, options.kind || "shell");
+  // 高风险操作每次都要确认，不提供“一直允许”
+  return confirmSystemAction(`${prefix}${summary}`, options.kind || "shell", { allowAlways: !options.dangerous });
 }
 
 function json(value: unknown) {

@@ -11,6 +11,7 @@ import {
 import { AUTOMATIONS_KEY, describeAutomation, useAutomationStore } from "../agent/automations";
 import { loadInitiativeMode, saveInitiativeMode, type InitiativeMode } from "../agent/initiative";
 import { allFlows, runFlow, type FlowResult, type UiFlow } from "../agent/uiFlow";
+import { ALWAYS_ALLOW_KEY, loadAlwaysAllow, removeAlwaysAllow } from "../agent/tools";
 
 const RETENTION_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "7", label: "7 天" },
@@ -91,6 +92,54 @@ const INITIATIVE_OPTIONS: Array<{ value: InitiativeMode; label: string }> = [
   { value: "off", label: "关闭" },
   { value: "suggest", label: "主动提议" },
 ];
+
+/** 审批卡片上点过“一直允许”的操作，可以在这里撤销。 */
+export function AlwaysAllowList() {
+  const [entries, setEntries] = useState(loadAlwaysAllow);
+
+  useEffect(() => {
+    const refresh = () => setEntries(loadAlwaysAllow());
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === ALWAYS_ALLOW_KEY || event.key === null) refresh();
+    };
+    window.addEventListener("storage", onStorage);
+    const timer = window.setInterval(refresh, 5000);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const scopes = Object.entries(entries);
+  return (
+    <div className="space-y-1.5">
+      <div className="text-sm text-fg">一直允许的操作</div>
+      {scopes.length === 0 ? (
+        <p className="text-xs text-fg-muted">还没有。确认卡片上点“一直允许”后会出现在这里；高风险操作不会被一直允许。</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {scopes.map(([scope, entry]) => (
+            <span key={scope} className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface-2 py-1 pl-3 pr-1.5 text-xs text-fg">
+              {entry.label}
+              <button
+                type="button"
+                onClick={() => {
+                  removeAlwaysAllow(scope);
+                  setEntries(loadAlwaysAllow());
+                }}
+                className="flex h-5 w-5 items-center justify-center rounded-full text-fg-muted hover:bg-surface hover:text-danger"
+                aria-label={`撤销一直允许${entry.label}`}
+                title="撤销，下次重新询问"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** 软件签到：内置 / 教过的流程，可以马上跑一次，或设成每天自动。 */
 function AppFlowsSection() {

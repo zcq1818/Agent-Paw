@@ -115,8 +115,13 @@ export function ChatView({ onOpenSidebar, onOpenSettings }: ChatViewProps) {
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
-    if (!text || isStreaming) return;
+    if (!text) return;
     setInput("");
+    if (isStreaming) {
+      // 运行中插话：不打断当前任务，模型下一步就能看到
+      useAgentStore.getState().interject(text);
+      return;
+    }
     addMessage({ role: "user", content: text });
     setEmotion("thinking");
     try {
@@ -331,12 +336,10 @@ export function ChatView({ onOpenSidebar, onOpenSettings }: ChatViewProps) {
             <div className="flex items-center gap-2 px-3 pb-2.5 pt-1">
               <span className="min-w-0 flex-1 truncate pl-1 text-xs text-fg-muted">
                 {isStreaming
-                  ? runningToolName
-                    ? `正在调用 ${runningToolName}…`
-                    : "正在生成…"
+                  ? `${runningToolName ? `正在调用 ${runningToolName}…` : "正在生成…"} 可以继续输入补充，Enter 发送`
                   : "Enter 发送 · Shift + Enter 换行"}
               </span>
-              {isStreaming ? (
+              {isStreaming && (
                 <button
                   type="button"
                   onClick={stopGeneration}
@@ -346,13 +349,14 @@ export function ChatView({ onOpenSidebar, onOpenSettings }: ChatViewProps) {
                 >
                   <Square size={12} fill="currentColor" />
                 </button>
-              ) : (
+              )}
+              {(!isStreaming || input.trim()) && (
                 <button
                   type="button"
                   onClick={handleSend}
                   disabled={!input.trim()}
-                  aria-label="发送"
-                  title="发送"
+                  aria-label={isStreaming ? "补充给正在进行的任务" : "发送"}
+                  title={isStreaming ? "补充给正在进行的任务" : "发送"}
                   className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-fg transition hover:brightness-110 disabled:bg-surface-2 disabled:text-fg-muted"
                 >
                   <ArrowUp size={17} strokeWidth={2.5} />

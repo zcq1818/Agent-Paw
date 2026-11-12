@@ -8,7 +8,9 @@ import { CLAUDE_LOCAL_PROVIDER, CODEBUDDY_LOCAL_PROVIDER, localAgentOf } from ".
 import { invoke } from "@tauri-apps/api/core";
 import { getAutomationTools } from "./automations";
 import { getHandoffTools } from "./handoff";
+import { runWithToolScope } from "./tools";
 import { getFlowTools } from "./uiFlow";
+import { formatInterjection, hasInterjections, takeInterjections } from "./interjections";
 import { personalityStore } from "./personality";
 import { securityManager } from "./security";
 import { getSkillsContext } from "./customSkills";
@@ -751,7 +753,7 @@ async function executeRuntimeToolCalls(
       const args = JSON.parse(tc.arguments || "{}");
       const executed = await securityManager.safeExecuteTool(tc.name, async () => {
         if (!tool) throw new Error(`未找到工具 ${tc.name}`);
-        return await tool.execute(args);
+        return await runWithToolScope(tc.name, () => tool.execute(args));
       });
       result = executed.result;
       status = executed.success ? "done" : "error";
@@ -838,7 +840,7 @@ export async function streamChat(
         securityManager.log("info", "tool", `Executing tool (claude-local): ${name}`);
         const executed = await securityManager.safeExecuteTool(name, async () => {
           if (!tool) throw new Error(`未找到工具 ${name}`);
-          return await tool.execute(args);
+          return await runWithToolScope(name, () => tool.execute(args));
         });
         return { result: executed.result, ok: executed.success };
       },
@@ -864,8 +866,26 @@ export async function streamChat(
   let ranOutOfRounds = true;
   let hitLengthLimit = false;
 
+  // 用户在运行中补充的话：塞进对话，模型下一轮就能看到
+  const injectInterjections = () => {
+    for (const text of takeInterjections()) {
+      currentMessages.push({ role: "user", content: formatInterjection(text) });
+    }
+  };
+  // 模型本来要结束了，但用户又补充了：把这轮的回复记下来，再跑一轮回应补充内容
+  const continueForInterjection = (roundText: string) => {
+    if (!hasInterjections() || maxRounds <= 0) return false;
+    currentMessages.push({ role: "assistant", content: roundText || "（继续处理中）" });
+    if (fullText && !fullText.endsWith("\n\n")) {
+      fullText += "\n\n";
+      onChunk("\n\n");
+    }
+    return true;
+  };
+
   while (maxRounds > 0) {
     maxRounds -= 1;
+    injectInterjections();
     securityManager.log("debug", "api", "Sending request to API", {
       provider: config.provider,
       model: config.model,
@@ -943,6 +963,7 @@ export async function streamChat(
       if (content) onChunk(content);
 
       if (!shouldSendTools || nonStreamToolCalls.length === 0) {
+        if (continueForInterjection(content)) continue;
         ranOutOfRounds = false;
         break;
       }
@@ -1039,6 +1060,7 @@ export async function streamChat(
 
     fullText += roundText;
     if (!shouldSendTools || toolCalls.length === 0) {
+      if (continueForInterjection(roundText)) continue;
       ranOutOfRounds = false;
       break;
     }
