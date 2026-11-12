@@ -59,7 +59,9 @@ import { THEME_OPTIONS, type AppTheme, useThemeClass, useThemeStore } from "../s
 import { useActivityStore } from "../store/activity";
 import { DEFAULT_CHAT_HOTKEY, normalizeHotkey, useShortcutStore } from "../store/shortcut";
 import { CustomSkillsSettings } from "./CustomSkillsSettings";
+import { InitiativeCard, TimelineOptions } from "./AssistantSettings";
 import { useAvatarOptions } from "../store/petAvatars";
+import type { ComputerControlMode } from "../agent/computer";
 
 interface SettingsProps {
   onBack: () => void;
@@ -89,6 +91,18 @@ const FREQUENCY_OPTIONS: { value: InteractionFrequency; label: string }[] = [
   { value: "normal", label: "正常" },
   { value: "frequent", label: "频繁" },
 ];
+
+const COMPUTER_CONTROL_OPTIONS: { value: ComputerControlMode; label: string }[] = [
+  { value: "off", label: "关闭" },
+  { value: "ask", label: "每次确认" },
+  { value: "trusted", label: "信任模式" },
+];
+
+const COMPUTER_CONTROL_HINT: Record<ComputerControlMode, string> = {
+  off: "桌宠不能操作电脑，只能聊天和管理待办日程。",
+  ask: "看窗口、读界面、读文件直接执行；执行命令、写文件、点击、输入每一步都会弹出确认卡片。",
+  trusted: "所有操作自动执行，不再询问；格式化、删系统文件、改注册表、关机等高风险操作仍然要你确认。随时可以点「停止」中断。",
+};
 
 const ROAM_SCOPE_OPTIONS: { value: RoamScope; label: string }[] = [
   { value: "full", label: "全桌面" },
@@ -172,6 +186,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
   const [enablePersonality, setEnablePersonality] = useState(config.enablePersonality ?? true);
   const [enableSecurity, setEnableSecurity] = useState(config.enableSecurity ?? true);
   const [enableMultimodal, setEnableMultimodal] = useState(config.enableMultimodal ?? true);
+  const [computerControl, setComputerControl] = useState<ComputerControlMode>(config.computerControl ?? "ask");
 
   const [petNameInput, setPetNameInput] = useState(petName);
   const [skin, setSkinLocal] = useState<PetSkin>(currentSkin);
@@ -335,7 +350,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
   // 底部“保存设置”只用于「AI 能力」和「快捷键」：不再顺带保存模型编辑器里的内容
   // （之前在桌宠页点保存，会把模型表单也存一遍，编辑中的“新模型”会被重复创建）。
   const saveAll = () => {
-    saveConfig({ enableMemory, enablePersonality, enableSecurity, enableMultimodal });
+    saveConfig({ enableMemory, enablePersonality, enableSecurity, enableMultimodal, computerControl });
     setName(petNameInput.trim() || "皮卡丘");
     setSkin(skin);
     setAvatar(avatar);
@@ -656,10 +671,22 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
               </Card>
 
               <Card
+                title="电脑控制"
+                description="让桌宠直接操作你的电脑：执行命令、读写文件、切换窗口、读取软件界面、点击和输入。"
+                actions={<Segmented value={computerControl} options={COMPUTER_CONTROL_OPTIONS} onChange={setComputerControl} />}
+              >
+                <p className="text-sm text-fg-muted">{COMPUTER_CONTROL_HINT[computerControl]}</p>
+                {computerControl === "trusted" && (
+                  <Notice tone="warning">信任模式下桌宠会自己点击和输入，操作过程中尽量别同时动鼠标键盘。</Notice>
+                )}
+              </Card>
+
+              <Card
                 title="本地活动观察"
-                description="只在本机记录当前活动窗口的标题和进程名，用于分析你的电脑使用情况；不截图、不记录键盘、不上传。"
+                description="让桌宠记住你在电脑上做过什么，之后能回答“我昨天下午在干嘛”、帮你写日报、找回打开过的文件。不截图、不记录按键、不上传。"
                 actions={<Switch label="本地活动观察" checked={activityEnabled} onChange={setActivityEnabled} />}
               >
+                <TimelineOptions enabled={activityEnabled} />
                 <div className="flex flex-wrap gap-2">
                   <Button size="sm" onClick={() => setActivitySummary(getActivitySummary())}>
                     <Activity size={14} />
@@ -669,7 +696,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
                     size="sm"
                     variant="danger"
                     onClick={() => {
-                      if (!confirm("确定清空本地活动记录吗？")) return;
+                      if (!confirm("确定清空全部本地活动记录（含时间线、文件和复制记录）吗？此操作不可恢复。")) return;
                       clearActivity();
                       setActivitySummary("活动记录已清空。");
                     }}
@@ -686,6 +713,8 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
                   </div>
                 )}
               </Card>
+
+              <InitiativeCard activityEnabled={activityEnabled} />
 
               <Card title="技能与统计">
                 <SettingRow title="自定义技能" description="创建、导入或停用技能。">

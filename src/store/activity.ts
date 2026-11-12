@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { create } from "zustand";
+import { applyTimelineConfig, clearTimeline } from "../agent/timeline";
 
 export type ActiveWindowInfo = {
   title: string;
@@ -214,7 +215,7 @@ function behaviorLabel(stats: ActivityStats) {
 
 function summarize(stats: ActivityStats) {
   if (stats.totalActiveMs === 0 && stats.typing.chars === 0) {
-    return "## 今日电脑活动分析\n\n今天还没有足够活动记录。开启本地活动观察后，我会统计应用使用时长、窗口切换、输入量和专注节奏。";
+    return "## 今日电脑活动分析\n\n今天还没有足够的活动记录（可能刚开启不久，或电脑一直处于锁屏 / 离开状态）。";
   }
 
   const topApps = stats.topApps.length
@@ -289,6 +290,7 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
   setEnabled: (enabled) => {
     localStorage.setItem(ENABLED_KEY, enabled ? "1" : "0");
     set({ enabled });
+    void applyTimelineConfig();
   },
 
   recordWindow: (info) => {
@@ -350,6 +352,8 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     localStorage.removeItem(ENTRIES_KEY);
     localStorage.removeItem(TYPING_KEY);
     set({ entries: [], typingSamples: [], current: undefined });
+    // 时间线（窗口 / 文件 / 剪贴板）一起清掉
+    void clearTimeline().catch(() => {});
   },
 
   syncFromStorage: (key) => {

@@ -561,6 +561,35 @@ textarea.input {
   padding-left: 1rem;
 }
 
+/* tailwind preflight 去掉了列表符号，气泡 / 迷你聊天里要补回来 */
+.pet-bubble-markdown ul { list-style: disc; }
+.pet-bubble-markdown ol { list-style: decimal; }
+.pet-bubble-markdown strong { font-weight: 700; }
+.pet-bubble-markdown em { color: rgb(var(--fg-muted)); }
+.pet-bubble-markdown blockquote {
+  margin: 0.3rem 0;
+  border-left: 3px solid rgb(var(--line));
+  padding-left: 0.5rem;
+  color: rgb(var(--fg-muted));
+}
+.pet-bubble-markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+.pet-bubble-markdown th,
+.pet-bubble-markdown td {
+  border: 1px solid rgb(var(--line));
+  padding: 0.15rem 0.35rem;
+  text-align: left;
+}
+.pet-bubble-markdown hr {
+  margin: 0.4rem 0;
+  border-color: rgb(var(--line));
+}
+
 .pet-bubble-markdown li + li {
   margin-top: 0.125rem;
 }
