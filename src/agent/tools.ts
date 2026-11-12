@@ -96,9 +96,9 @@ export function loadAlwaysAllow(): Record<string, AlwaysAllowEntry> {
   return readJson<Record<string, AlwaysAllowEntry>>(ALWAYS_ALLOW_KEY, {});
 }
 
-export function addAlwaysAllow(scope: string) {
+export function addAlwaysAllow(scope: string, label?: string) {
   const all = loadAlwaysAllow();
-  all[scope] = { label: scopeLabel(scope), at: new Date().toISOString() };
+  all[scope] = { label: label || scopeLabel(scope), at: new Date().toISOString() };
   writeJson(ALWAYS_ALLOW_KEY, all);
 }
 
@@ -134,7 +134,7 @@ export async function runWithToolScope<T>(name: string, fn: () => Promise<T>): P
 export function confirmSystemAction(
   message: string,
   kind: ApprovalKind = "shell",
-  options: { scope?: string; allowAlways?: boolean } = {}
+  options: { scope?: string; allowAlways?: boolean; label?: string } = {}
 ): Promise<boolean> {
   if (typeof window === "undefined") return Promise.resolve(true);
 
@@ -147,7 +147,7 @@ export function confirmSystemAction(
       type: "approval",
       id: `auto_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       status: "done",
-      detail: `已按“一直允许${scopeLabel(scope)}”自动放行：${summary}`,
+      detail: `已按“一直允许${options.label || scopeLabel(scope)}”自动放行：${summary}`,
       at: Date.now(),
     });
     return Promise.resolve(true);
@@ -161,7 +161,7 @@ export function confirmSystemAction(
     summary,
     detail: message,
     scope,
-    scopeLabel: scopeLabel(scope),
+    scopeLabel: options.label || scopeLabel(scope),
     allowAlways,
   });
   emitToolEvent({

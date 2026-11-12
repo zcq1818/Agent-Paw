@@ -13,7 +13,21 @@ import { migrateAvatar, type PetAvatar, type PetSkin } from "./pet";
  * 后续再逐层把单例改成按 botId 分区。此文件为纯新增，不改动现有调用方。
  */
 
-export type BotRole = "chief" | "coder" | "research" | "ops" | "review" | "custom";
+export type BotRole =
+  | "chief"
+  | "coder"
+  | "research"
+  | "ops"
+  | "review"
+  | "writer"
+  | "translator"
+  | "analyst"
+  | "product"
+  | "tester"
+  | "designer"
+  | "tutor"
+  | "life"
+  | "custom";
 export type ApprovalLevel = "ask" | "edits" | "auto";
 export type ApprovalStatus = "pending" | "allowed" | "denied" | "expired";
 export type ApprovalKind = "shell" | "file_edit" | "network" | "tool";
@@ -151,6 +165,102 @@ export const ROLE_PRESETS: Array<{
     skills: [],
     approvalLevel: "ask",
   },
+  {
+    role: "writer",
+    name: "笔杆子",
+    avatar: "writer",
+    petAvatar: "cat",
+    petSkin: "pink",
+    tagline: "写文案、周报、邮件，改稿润色",
+    instructions:
+      "你是写作助手。先问清用途、读者和长度（用户没说就按常见场景给一版），直接给能用的成稿，不写空话套话；改稿时保留原意，说明改了哪里。",
+    skills: [],
+    approvalLevel: "ask",
+  },
+  {
+    role: "translator",
+    name: "翻译官",
+    avatar: "translator",
+    petAvatar: "penguin",
+    petSkin: "blue",
+    tagline: "中英日互译，保留语气和术语",
+    instructions:
+      "你是翻译助手。中文默认译成英文，其他语言默认译成中文；保留原文格式、语气和专有名词，术语有歧义时在译文后用一行注明。只输出译文，除非用户要求解释。",
+    skills: [],
+    approvalLevel: "ask",
+  },
+  {
+    role: "analyst",
+    name: "数据分析师",
+    avatar: "analyst",
+    petAvatar: "robot",
+    petSkin: "green",
+    tagline: "看表格、算指标、找原因",
+    instructions:
+      "你是数据分析助手。先说清数据口径和假设，再给结论；数字要能复算，能用表格就用表格；数据不足以下结论时直说缺什么。",
+    skills: [],
+    approvalLevel: "ask",
+  },
+  {
+    role: "product",
+    name: "产品经理",
+    avatar: "product",
+    petAvatar: "fox",
+    petSkin: "blue",
+    tagline: "梳理需求、写 PRD、排优先级",
+    instructions:
+      "你是产品经理助手。把模糊想法拆成用户、场景、问题、方案和验收标准；给优先级时说明理由；输出用清单和表格，避免空泛的方法论。",
+    skills: [],
+    approvalLevel: "ask",
+  },
+  {
+    role: "tester",
+    name: "测试员",
+    avatar: "tester",
+    petAvatar: "dino",
+    petSkin: "yellow",
+    tagline: "想测试用例、找边界情况、复现 bug",
+    instructions:
+      "你是测试助手。针对给定功能列出正常、边界、异常三类用例；复现问题时给出最小步骤、预期和实际结果；不确定的地方标出来。",
+    skills: [],
+    approvalLevel: "ask",
+  },
+  {
+    role: "designer",
+    name: "设计师",
+    avatar: "designer",
+    petAvatar: "toon_pikachu",
+    petSkin: "pink",
+    tagline: "界面、配色、排版建议",
+    instructions:
+      "你是 UI / 视觉设计助手。给建议时说明理由（层级、对比、间距、一致性），配色给出具体色值，尽量给可以直接用的 CSS 或布局描述。",
+    skills: [],
+    approvalLevel: "ask",
+  },
+  {
+    role: "tutor",
+    name: "学习搭子",
+    avatar: "tutor",
+    petAvatar: "penguin",
+    petSkin: "green",
+    tagline: "讲概念、出练习、陪你复习",
+    instructions:
+      "你是学习助手。先用一句话讲清核心，再举例子；讲完出 1-2 道小题检验理解；用户答错时指出错在哪，不直接甩答案。",
+    skills: [],
+    approvalLevel: "ask",
+  },
+  {
+    role: "life",
+    name: "生活管家",
+    avatar: "life",
+    petAvatar: "cat",
+    petSkin: "yellow",
+    tagline: "天气、出行、吃饭、购物清单",
+    instructions:
+      "你是生活助手。回答要具体可执行：给出时间、地点、清单或步骤；涉及天气、日程时优先调用对应工具，不凭印象回答。",
+    skills: ["weather", "todo"],
+    approvalLevel: "ask",
+  },
 ];
 
 function defaultBots(): BotProfile[] {
@@ -261,8 +371,9 @@ export interface BotState {
   approvals: ApprovalRequest[];
   activeBotId: string;
   activeThreadId: string;
-  createBot: (input: Partial<BotProfile> & { name: string }) => string;
-  createBotFromRole: (role: BotRole) => string | undefined;
+  /** activate 默认 true：新建后切换为当前 Bot；批量添加时传 false。 */
+  createBot: (input: Partial<BotProfile> & { name: string }, options?: { activate?: boolean }) => string;
+  createBotFromRole: (role: BotRole, options?: { activate?: boolean }) => string | undefined;
   updateBot: (id: string, patch: Partial<BotProfile>) => void;
   archiveBot: (id: string) => void;
   switchBot: (id: string) => void;
@@ -291,7 +402,7 @@ export const useBotStore = create<BotState>((set, get) => {
   return {
     ...loadState(),
 
-    createBot: (input) => {
+    createBot: (input, options) => {
       const now = nowIso();
       const bot: BotProfile = {
         id: uid("bot"),
@@ -307,11 +418,12 @@ export const useBotStore = create<BotState>((set, get) => {
         createdAt: now,
         updatedAt: now,
       };
-      commit({ bots: [...get().bots, bot], activeBotId: bot.id, activeThreadId: "" });
+      if (options?.activate === false) commit({ bots: [...get().bots, bot] });
+      else commit({ bots: [...get().bots, bot], activeBotId: bot.id, activeThreadId: "" });
       return bot.id;
     },
 
-    createBotFromRole: (role) => {
+    createBotFromRole: (role, options) => {
       const preset = ROLE_PRESETS.find((item) => item.role === role);
       if (!preset) return undefined;
       return get().createBot({
@@ -324,7 +436,7 @@ export const useBotStore = create<BotState>((set, get) => {
         instructions: preset.instructions,
         skills: [...preset.skills],
         approvalLevel: preset.approvalLevel,
-      });
+      }, options);
     },
 
     updateBot: (id, patch) => {

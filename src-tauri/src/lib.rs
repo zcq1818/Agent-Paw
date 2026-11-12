@@ -6,6 +6,7 @@ use serde::Serialize;
 mod ai_apps;
 mod claude_code;
 mod control;
+mod mcp_client;
 mod ocr;
 mod timeline;
 mod tray;
@@ -437,8 +438,17 @@ pub fn run() {
             ai_apps::ai_apps,
             ai_apps::open_in_trae,
             ai_apps::open_workbuddy,
-            ocr::ocr_window
+            ocr::ocr_window,
+            mcp_client::mcp_stdio_request,
+            mcp_client::mcp_stdio_stop,
+            mcp_client::mcp_stdio_running
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app, event| {
+            // 退出时结束外部 MCP 服务进程，免得留下没人管的 node / python 进程
+            if let tauri::RunEvent::Exit = event {
+                mcp_client::stop_all();
+            }
+        });
 }

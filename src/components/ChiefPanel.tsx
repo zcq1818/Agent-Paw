@@ -169,7 +169,21 @@ export function ChiefPanel({ onClose }: ChiefPanelProps) {
                 </div>
                 {expanded[expert.id] && (
                   <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                    {expert.provider === "claude-local" ? (
+                    {expert.provider === "codebuddy-local" ? (
+                      <>
+                        <label className="ui-muted text-xs sm:col-span-2">
+                          模型（留空用 CodeBuddy 默认）
+                          <input
+                            className="input mt-1"
+                            value={expert.model}
+                            onChange={(event) => updateExpert(expert.id, { model: event.target.value })}
+                          />
+                        </label>
+                        <p className="ui-muted text-xs sm:col-span-2">
+                          需要先在终端运行 codebuddy 并 /login 登录；桌宠不会读取或保存你的账号。
+                        </p>
+                      </>
+                    ) : expert.provider === "claude-local" ? (
                       <>
                         <label className="ui-muted text-xs sm:col-span-2">
                           CLI 路径（留空由桌面端自动探测）

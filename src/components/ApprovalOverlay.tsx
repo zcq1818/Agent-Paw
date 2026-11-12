@@ -46,9 +46,15 @@ export function ApprovalOverlay({ compact = false }: { compact?: boolean }) {
                 )}
               </div>
               <p className="mt-2 text-sm font-semibold">{request.summary}</p>
-              <pre className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap text-xs ui-muted">
-                {request.detail}
-              </pre>
+              {/* 详情第一行就是标题，不再重复显示 */}
+              {(() => {
+                const detail = request.detail.startsWith(request.summary)
+                  ? request.detail.slice(request.summary.length).trim()
+                  : request.detail;
+                return detail ? (
+                  <pre className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap text-xs ui-muted">{detail}</pre>
+                ) : null;
+              })()}
               <div className={`mt-3 grid gap-2 ${request.allowAlways ? "grid-cols-3" : "grid-cols-2"}`}>
                 <button
                   type="button"
@@ -61,7 +67,7 @@ export function ApprovalOverlay({ compact = false }: { compact?: boolean }) {
                   <button
                     type="button"
                     onClick={() => {
-                      addAlwaysAllow(request.scope!);
+                      addAlwaysAllow(request.scope!, request.scopeLabel);
                       resolveApproval(request.id, "allowed");
                     }}
                     title={`以后「${request.scopeLabel || request.scope}」不再询问（高风险操作仍会确认），可在 设置 → AI 能力 → 电脑控制 里撤销`}
