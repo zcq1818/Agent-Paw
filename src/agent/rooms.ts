@@ -2,6 +2,7 @@ import {
   buildChatCompletionsUrl,
   buildRequestHeaders,
   configForBot,
+  fetchModelApi,
   normalizeConfig,
 } from "./kernel";
 import type { BotProfile } from "../store/bots";
@@ -56,7 +57,7 @@ export async function askBot(
     { role: "user", content: prompt },
   ];
 
-  const resp = await fetch(buildChatCompletionsUrl(config), {
+  const resp = await fetchModelApi(buildChatCompletionsUrl(config), {
     method: "POST",
     headers: buildRequestHeaders(config),
     body: JSON.stringify({

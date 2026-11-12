@@ -30,8 +30,10 @@
       {
         "label": "main",
         "title": "Paw - 工作台",
-        "width": 480,
-        "height": 640,
+        "width": 1040,
+        "height": 720,
+        "minWidth": 420,
+        "minHeight": 520,
         "resizable": true,
         "decorations": true,
         "transparent": false,

@@ -2,17 +2,16 @@ import { useEffect } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 
-export type AppTheme = "cozy" | "pixel" | "neon" | "clean";
+export type AppTheme = "light" | "dark" | "system";
 
 export const THEME_OPTIONS: Array<{
   id: AppTheme;
   label: string;
   description: string;
 }> = [
-  { id: "cozy", label: "柔和桌宠", description: "更像轻松陪伴型桌宠，暖色、圆角、轻阴影。" },
-  { id: "pixel", label: "像素复古", description: "保留游戏机窗口感，但作为可选风格。" },
-  { id: "neon", label: "霓虹代理", description: "偏 AI Agent 控制台，深色、高对比、发光线条。" },
-  { id: "clean", label: "清爽助手", description: "更像专业桌面助手，浅色、克制、信息清楚。" },
+  { id: "light", label: "浅色", description: "白底深色文字，信息清楚。" },
+  { id: "dark", label: "深色", description: "深蓝底色，夜间更护眼。" },
+  { id: "system", label: "跟随系统", description: "随 Windows 的浅色 / 深色模式切换。" },
 ];
 
 interface ThemeState {
@@ -24,15 +23,27 @@ interface ThemeState {
 const STORAGE_KEY = "paw_ui_theme";
 
 function isTheme(value: unknown): value is AppTheme {
-  return value === "cozy" || value === "pixel" || value === "neon" || value === "clean";
+  return value === "light" || value === "dark" || value === "system";
+}
+
+/** 旧版的四种风格迁移到新主题：霓虹 / 像素是深色系，其余用浅色。 */
+function migrateLegacyTheme(value: string | null): AppTheme | null {
+  if (value === "neon" || value === "pixel") return "dark";
+  if (value === "clean" || value === "cozy") return "light";
+  return null;
 }
 
 function loadTheme(): AppTheme {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (isTheme(saved)) return saved;
+    const migrated = migrateLegacyTheme(saved);
+    if (migrated) {
+      localStorage.setItem(STORAGE_KEY, migrated);
+      return migrated;
+    }
   } catch {}
-  return "cozy";
+  return "light";
 }
 
 function saveTheme(theme: AppTheme) {
@@ -42,7 +53,7 @@ function saveTheme(theme: AppTheme) {
 }
 
 export function getThemeClass(theme: AppTheme) {
-  return `themed-ui theme-${theme}${theme === "pixel" ? " pixel-ui" : ""}`;
+  return `themed-ui theme-${theme}`;
 }
 
 export const useThemeStore = create<ThemeState>((set) => ({

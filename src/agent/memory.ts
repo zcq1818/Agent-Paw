@@ -5,7 +5,7 @@
  * - 记忆分类和过期清理
  */
 
-import { buildChatCompletionsUrl, buildRequestHeaders, getEmbeddingModel, loadConfig, parseConfigJson } from "./kernel";
+import { buildChatCompletionsUrl, buildRequestHeaders, fetchModelApi, getEmbeddingModel, loadConfig, parseConfigJson } from "./kernel";
 import { scopeKey } from "./scope";
 
 export type MemoryType = "preference" | "fact" | "habit" | "important" | "task";
@@ -454,7 +454,7 @@ class MemoryStore {
 
     try {
       const prompt = AUTO_EXTRACT_PROMPT.replace("{conversation}", conversation);
-      const resp = await fetch(buildChatCompletionsUrl(config), {
+      const resp = await fetchModelApi(buildChatCompletionsUrl(config), {
         method: "POST",
         headers: buildRequestHeaders(config),
         body: JSON.stringify({
@@ -629,7 +629,7 @@ class MemoryStore {
     if ((this.embeddingUnsupportedUntil.get(endpointKey) || 0) > Date.now()) return undefined;
 
     try {
-      const resp = await fetch(`${config.baseUrl.replace(/\/+$/, "")}/embeddings`, {
+      const resp = await fetchModelApi(`${config.baseUrl.replace(/\/+$/, "")}/embeddings`, {
         method: "POST",
         headers: buildRequestHeaders(config),
         body: JSON.stringify({

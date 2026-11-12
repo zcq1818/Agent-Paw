@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { ArrowRight, Check, Copy, RotateCcw } from "lucide-react";
 import type { SurfaceSpec } from "../agent/surfaces";
 import type { ToolRun } from "../agent/toolEvents";
 import { useBotStore } from "../store/bots";
@@ -13,7 +14,7 @@ function StreamingText({ text }: { text: string }) {
   const head = text.slice(0, text.length - tailLength);
   const tail = Array.from(text.slice(text.length - tailLength));
   return (
-    <div className="streaming-text whitespace-pre-wrap">
+    <div className="streaming-text whitespace-pre-wrap text-[0.92rem] leading-[1.75]">
       {head}
       <span key={text.length} className="stream-tail">
         {tail.map((character, index) => (
@@ -37,10 +38,28 @@ interface ChatMessageProps {
     toolRuns?: ToolRun[];
   };
   isStreaming?: boolean;
+  /** 最后一条助手回复：常驻显示“重新生成 / 继续”。 */
+  isLast?: boolean;
+  onRetry?: () => void;
+  onContinue?: () => void;
   onSurfaceAction?: (prompt: string) => void;
 }
 
-export function ChatMessage({ message, isStreaming, onSurfaceAction }: ChatMessageProps) {
+function ActionButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-xs text-fg-muted transition hover:bg-surface-2 hover:text-fg"
+    >
+      {children}
+    </button>
+  );
+}
+
+export function ChatMessage({ message, isStreaming, isLast, onRetry, onContinue, onSurfaceAction }: ChatMessageProps) {
   const isUser = message.role === "user";
   const activeBot = useBotStore((state) => state.bots.find((bot) => bot.id === state.activeBotId));
   const [copied, setCopied] = useState(false);
@@ -60,33 +79,45 @@ export function ChatMessage({ message, isStreaming, onSurfaceAction }: ChatMessa
     }
   };
 
-  const botSurfaceStyle = {
-    background: "var(--ui-surface)",
-    borderColor: "var(--ui-border)",
-    color: "var(--ui-text)",
-  };
+  if (isUser) {
+    return (
+      <div className="group flex flex-col items-end gap-1">
+        <div className="max-w-[85%] select-text whitespace-pre-wrap rounded-2xl rounded-br-md bg-primary/15 px-4 py-2.5 text-[0.92rem] leading-relaxed text-fg">
+          {message.content}
+        </div>
+        <div className="flex items-center gap-1 text-[11px] text-fg-muted opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
+          {timeLabel && <span className="px-1">{timeLabel}</span>}
+          <ActionButton label={copied ? "已复制" : "复制"} onClick={copyMessage}>
+            {copied ? <Check size={13} /> : <Copy size={13} />}
+          </ActionButton>
+        </div>
+      </div>
+    );
+  }
+
+  const waiting = isStreaming && !message.content;
 
   return (
-    <div className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}>
-      <div
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-yellow-200 text-sm shadow-lg ${
-          isUser ? "bg-blue-600 text-white" : ""
-        }`}
-        style={isUser ? undefined : { background: "var(--ui-surface-strong)", color: "var(--ui-text)" }}
-        aria-label={isUser ? "用户" : activeBot?.name || "桌宠"}
-      >
-        {isUser ? "你" : activeBot ? <BotAvatar bot={activeBot} size={26} /> : "P"}
+    <div className="group flex gap-3">
+      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line bg-surface">
+        {activeBot ? <BotAvatar bot={activeBot} size={24} /> : <span className="text-xs font-bold text-primary-ink">P</span>}
       </div>
 
-      <div className={`group flex max-w-[80%] flex-col gap-1 ${isUser ? "items-end" : "items-start"}`}>
-        <div
-          className={`rounded-2xl border-2 px-4 py-2.5 shadow-lg ${
-            isUser ? "rounded-tr-md border-blue-200 bg-blue-600 text-white" : "rounded-tl-md"
-          }`}
-          style={isUser ? undefined : botSurfaceStyle}
-        >
-          {isUser ? (
-            <p className="whitespace-pre-wrap">{message.content}</p>
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-center gap-2 text-xs">
+          <span className="font-medium text-fg">{activeBot?.name || "皮卡丘"}</span>
+          {timeLabel && !isStreaming && <span className="text-fg-muted">{timeLabel}</span>}
+        </div>
+
+        <div className="text-fg">
+          {waiting ? (
+            <div className="flex h-7 items-center">
+              <span className="typing-dots" aria-label="正在思考">
+                <span />
+                <span />
+                <span />
+              </span>
+            </div>
           ) : isStreaming ? (
             <StreamingText text={message.content} />
           ) : (
@@ -97,19 +128,30 @@ export function ChatMessage({ message, isStreaming, onSurfaceAction }: ChatMessa
           {message.surface && <SurfaceRenderer surface={message.surface} onAction={onSurfaceAction} />}
           <ToolRunList runs={message.toolRuns} />
         </div>
-        <div className={`flex items-center gap-2 px-1 text-[11px] ui-muted ${isUser ? "flex-row-reverse" : ""}`}>
-          {!isUser && activeBot && <span>{activeBot.name}</span>}
-          {timeLabel && <span>{timeLabel}</span>}
-          {message.content && !isStreaming && (
-            <button
-              type="button"
-              onClick={copyMessage}
-              className="opacity-0 transition-opacity hover:underline group-hover:opacity-100 focus:opacity-100"
-            >
-              {copied ? "已复制" : "复制"}
-            </button>
-          )}
-        </div>
+
+        {message.content && !isStreaming && (
+          <div
+            className={`mt-1 flex items-center gap-0.5 transition ${
+              isLast ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+            }`}
+          >
+            <ActionButton label={copied ? "已复制" : "复制"} onClick={copyMessage}>
+              {copied ? <Check size={13} /> : <Copy size={13} />}
+            </ActionButton>
+            {isLast && onRetry && (
+              <ActionButton label="重新生成" onClick={onRetry}>
+                <RotateCcw size={13} />
+                <span>重新生成</span>
+              </ActionButton>
+            )}
+            {isLast && onContinue && (
+              <ActionButton label="继续回答" onClick={onContinue}>
+                <ArrowRight size={13} />
+                <span>继续</span>
+              </ActionButton>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

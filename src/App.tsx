@@ -1,20 +1,18 @@
 import { Suspense, lazy, useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { listen } from "@tauri-apps/api/event";
 import { useChatHotkeyRegistration } from "./store/shortcut";
 import { useBotRosterSync } from "./store/bots";
 import { ApprovalOverlay } from "./components/ApprovalOverlay";
 import { useBotScopeSync } from "./agent/botScopeSync";
 import { useCrossWindowSync } from "./store/windowSync";
-
-type MainView = "chat" | "settings";
+import { useThemeClass } from "./store/theme";
 
 const Pet = lazy(() => import("./components/Pet").then((module) => ({ default: module.Pet })));
-const ChatPanel = lazy(() => import("./components/ChatPanel").then((module) => ({ default: module.ChatPanel })));
-const Settings = lazy(() => import("./components/Settings").then((module) => ({ default: module.Settings })));
+const Workbench = lazy(() => import("./components/Workbench").then((module) => ({ default: module.Workbench })));
 
 function LoadingShell() {
-  return <div className="chat-window flex h-screen w-screen items-center justify-center text-sm text-gray-400">Loading...</div>;
+  const themeClass = useThemeClass();
+  return <div className={`${themeClass} flex h-screen w-screen items-center justify-center bg-app text-sm text-fg-muted`}>加载中…</div>;
 }
 
 function resolveWindowLabel(): string {
@@ -29,7 +27,6 @@ function resolveWindowLabel(): string {
 
 export default function App() {
   const [windowLabel] = useState<string>(resolveWindowLabel);
-  const [mainView, setMainView] = useState<MainView>("chat");
 
   useChatHotkeyRegistration(windowLabel === "pet");
   useBotRosterSync();
@@ -46,8 +43,6 @@ export default function App() {
         .then((fn) => (disposed ? fn() : unlisteners.push(fn)))
         .catch(() => {});
 
-    track(listen("open-chat", () => setMainView("chat")));
-    track(listen("open-settings", () => setMainView("settings")));
     try {
       track(
         getCurrentWindow().onCloseRequested(async (event) => {
@@ -83,20 +78,7 @@ export default function App() {
   return (
     <>
       <Suspense fallback={<LoadingShell />}>
-        {mainView === "settings" ? (
-          <Settings onBack={() => setMainView("chat")} />
-        ) : (
-          <ChatPanel
-            onOpenSettings={() => setMainView("settings")}
-            onBack={() => {
-              try {
-                getCurrentWindow().hide();
-              } catch {
-                // Browser dev fallback.
-              }
-            }}
-          />
-        )}
+        <Workbench />
       </Suspense>
       <ApprovalOverlay />
     </>

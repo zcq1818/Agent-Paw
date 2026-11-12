@@ -24,7 +24,8 @@ fn toggle_main_window(app: tauri::AppHandle) {
     } else {
         let _ = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
             .title("Paw - 工作台")
-            .inner_size(480.0, 640.0)
+            .inner_size(1040.0, 720.0)
+            .min_inner_size(420.0, 520.0)
             .resizable(true)
             .build();
     }
