@@ -2,7 +2,27 @@ import { create } from "zustand";
 
 export type Emotion = "idle" | "thinking" | "excited" | "sleepy" | "happy";
 export type PetSkin = "yellow" | "blue" | "pink" | "green";
-export type PetAvatar = "pixel_pikachu" | "pixel_cat" | "pixel_dog" | "toon_pikachu";
+/** 形态清单与说明见 store/petAvatars.ts；custom:xxx 是本机私人定制的模型。 */
+export type PetAvatar =
+  | "fox"
+  | "cat"
+  | "dino"
+  | "robot"
+  | "penguin"
+  | "toon_pikachu"
+  | `custom:${string}`;
+
+/** 像素形态已移除：旧配置里的像素形态换成对应的 3D 形态。 */
+const LEGACY_AVATARS: Record<string, PetAvatar> = {
+  pixel_pikachu: "fox",
+  pixel_cat: "cat",
+  pixel_dog: "fox",
+};
+
+export function migrateAvatar(value: unknown): PetAvatar | undefined {
+  if (typeof value !== "string" || !value) return undefined;
+  return LEGACY_AVATARS[value] || (value as PetAvatar);
+}
 export type TimeOfDay = "morning" | "afternoon" | "evening" | "night";
 export type InteractionFrequency = "rare" | "normal" | "frequent";
 export type RoamScope = "full" | "nearby" | "corner";
@@ -122,7 +142,7 @@ export const usePetStore = create<PetState>((set, get) => ({
   emotion: "idle",
   name: defaultConfig.name || "皮卡丘",
   skin: defaultConfig.skin || "yellow",
-  avatar: defaultConfig.avatar || "toon_pikachu",
+  avatar: migrateAvatar(defaultConfig.avatar) || "fox",
   autoAction: defaultConfig.autoAction ?? true,
   enableInteractions: defaultConfig.enableInteractions ?? true,
   interactionFrequency: defaultConfig.interactionFrequency || "normal",
@@ -223,7 +243,7 @@ export const usePetStore = create<PetState>((set, get) => ({
     set({
       name: config.name || state.name,
       skin: config.skin || state.skin,
-      avatar: config.avatar || state.avatar,
+      avatar: migrateAvatar(config.avatar) || state.avatar,
       autoAction: config.autoAction ?? state.autoAction,
       enableInteractions: config.enableInteractions ?? state.enableInteractions,
       interactionFrequency: config.interactionFrequency || state.interactionFrequency,

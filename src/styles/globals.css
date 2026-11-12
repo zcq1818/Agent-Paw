@@ -553,7 +553,7 @@ textarea.input {
   margin: 0.25rem 0;
   font-size: 0.92rem;
   font-weight: 800;
-  color: #1f2937;
+  color: rgb(var(--fg));
 }
 
 .pet-bubble-markdown ul,
@@ -566,7 +566,7 @@ textarea.input {
 }
 
 .pet-bubble-markdown a {
-  color: #92400e;
+  color: rgb(var(--primary-ink));
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -586,10 +586,9 @@ textarea.input {
   padding: 0.4rem;
 }
 
-/* 3D pet canvas */
+/* 3D pet canvas：平滑渲染 + 柔和投影 */
 .pet-window canvas {
-  filter: drop-shadow(4px 8px 0 rgba(0, 0, 0, 0.28));
-  image-rendering: pixelated;
+  filter: drop-shadow(0 6px 10px rgba(4, 30, 66, 0.22));
 }
 
 /* Legacy SVG pet (kept for fallback) */
@@ -603,69 +602,6 @@ textarea.input {
   will-change: transform;
   filter: drop-shadow(4px 7px 0 rgba(0, 0, 0, 0.25));
   image-rendering: pixelated;
-}
-
-.pixel-pet {
-  transform-origin: center bottom;
-  image-rendering: pixelated;
-  filter: drop-shadow(4px 7px 0 rgba(0, 0, 0, 0.28));
-  will-change: transform;
-}
-
-.pixel-pet svg {
-  display: block;
-  overflow: visible;
-}
-
-.pixel-pet--idle,
-.pixel-pet--morning,
-.pixel-pet--night {
-  animation: pixel-pet-idle 1.6s steps(4, end) infinite;
-}
-
-.pixel-pet--walk {
-  animation: pixel-pet-walk 0.36s steps(2, end) infinite;
-}
-
-.pixel-pet--sit {
-  animation: pixel-pet-sit 2s steps(3, end) infinite;
-}
-
-.pixel-pet--sleep {
-  animation: pixel-pet-sleep 2.4s steps(4, end) infinite;
-}
-
-.pixel-pet--excited {
-  animation: pixel-pet-excited 0.42s steps(2, end) infinite;
-}
-
-.pixel-pet--thinking {
-  animation: pixel-pet-thinking 1.2s steps(3, end) infinite;
-}
-
-.pixel-pet--dance {
-  animation: pixel-pet-dance 0.5s steps(3, end) infinite;
-}
-
-.pixel-pet--stretch {
-  animation: pixel-pet-stretch 1.1s steps(4, end) infinite;
-}
-
-.pixel-pet--look {
-  animation: pixel-pet-look 1.4s steps(4, end) infinite;
-}
-
-.pixel-pet--wave {
-  animation: pixel-pet-wave 0.62s steps(2, end) infinite;
-}
-
-.pixel-pet-sparks {
-  animation: pixel-spark-blink 0.35s steps(1, end) infinite;
-}
-
-.pixel-pet-dots,
-.pixel-pet-z {
-  animation: pixel-float-up 1.2s steps(3, end) infinite;
 }
 
 .pet-body,
@@ -699,69 +635,6 @@ textarea.input {
   0%, 55% { opacity: 1; }
   56%, 72% { opacity: 0; }
   73%, 100% { opacity: 1; }
-}
-
-@keyframes pixel-pet-idle {
-  0%, 100% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-4px) scale(1.02, 0.99); }
-}
-
-@keyframes pixel-pet-walk {
-  0% { transform: translate(0, 0) rotate(-3deg); }
-  50% { transform: translate(2px, -5px) rotate(3deg); }
-  100% { transform: translate(0, 0) rotate(-3deg); }
-}
-
-@keyframes pixel-pet-sit {
-  0%, 100% { transform: translateY(3px) scale(1.04, 0.96); }
-  50% { transform: translateY(1px) scale(1.02, 0.98); }
-}
-
-@keyframes pixel-pet-sleep {
-  0%, 100% { transform: translateY(4px) rotate(-4deg) scale(1.05, 0.94); }
-  50% { transform: translateY(6px) rotate(-4deg) scale(1.08, 0.92); }
-}
-
-@keyframes pixel-pet-excited {
-  0%, 100% { transform: translateY(0) rotate(-5deg) scale(1.04); }
-  50% { transform: translateY(-10px) rotate(5deg) scale(1.06); }
-}
-
-@keyframes pixel-pet-thinking {
-  0%, 100% { transform: translateY(0) rotate(0deg); }
-  50% { transform: translateY(-3px) rotate(-3deg); }
-}
-
-@keyframes pixel-pet-dance {
-  0%, 100% { transform: translate(-2px, 0) rotate(-8deg) scale(1.03); }
-  50% { transform: translate(2px, -8px) rotate(8deg) scale(1.07); }
-}
-
-@keyframes pixel-pet-stretch {
-  0%, 100% { transform: translateY(2px) scale(1.1, 0.92); }
-  45% { transform: translateY(-5px) scale(0.94, 1.12); }
-  70% { transform: translateY(-2px) scale(1.02, 1.02); }
-}
-
-@keyframes pixel-pet-look {
-  0%, 100% { transform: translateX(-3px) rotate(-2deg); }
-  50% { transform: translateX(3px) rotate(2deg); }
-}
-
-@keyframes pixel-pet-wave {
-  0%, 100% { transform: translateY(0) rotate(-4deg); }
-  50% { transform: translateY(-5px) rotate(6deg); }
-}
-
-@keyframes pixel-spark-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-
-@keyframes pixel-float-up {
-  0% { opacity: 0.2; transform: translateY(2px); }
-  40% { opacity: 1; }
-  100% { opacity: 0.2; transform: translateY(-3px); }
 }
 
 .animate-float {

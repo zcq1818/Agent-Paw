@@ -63,7 +63,8 @@ npm run tauri:build
 │   ├── capabilities/         权限；http:default 里是允许抓取的域名白名单
 │   └── tauri.conf.json       两个窗口：pet（透明置顶）与 main（工作台，默认隐藏）
 ├── skills/                   示例 SKILL.md，可在 Skills 页导入
-└── public/models/pet.glb     3D 宠物模型
+├── tools/pets/build_pets.py  用 Blender 生成带骨骼和动作的桌宠模型
+└── public/models/            pet.glb（3D 皮卡丘）、pets/*.glb（带骨骼的桌宠形态）
 ```
 
 ### 两个窗口的状态
@@ -71,6 +72,20 @@ npm run tauri:build
 `pet` 与 `main` 是两个独立的 WebView，各有一份 zustand 状态，但共用 localStorage。
 写入方保存到 localStorage，另一个窗口通过 `storage` 事件重新载入（见 `store/windowSync.ts`、
 `store/bots.ts`、`store/theme.ts`）。新增需要跨窗口共享的状态时，记得接入同步。
+
+### 桌宠模型（Blender）
+
+`public/models/pets/*.glb` 由 `tools/pets/build_pets.py` 生成：所有形态共用一套骨骼
+（hips / spine / head / ear / eye / arm / leg / tail），动作片段名与宠物状态一致
+（idle、walk、sit、sleep、excited、thinking、dance、stretch、look、wave，另有可叠加的 blink），
+由 `components/RiggedPet3D.tsx` 用 AnimationMixer 按状态交叉淡入播放。
+
+```bash
+blender -b --factory-startup -P tools/pets/build_pets.py -- public/models/pets [预览图目录] [只生成的形态,逗号分隔]
+```
+
+私人定制形象（比如照着家人照片做的）写在 `tools/pets/custom_pets.py`，输出到
+`public/models/pets/custom/` 并生成 `manifest.json`，应用会自动列出；这两处都在 `.gitignore` 里，不会被提交。
 
 ### 访问第三方网站
 
