@@ -62,6 +62,7 @@ import { CustomSkillsSettings } from "./CustomSkillsSettings";
 import { InitiativeCard, TimelineOptions } from "./AssistantSettings";
 import { useAvatarOptions } from "../store/petAvatars";
 import type { ComputerControlMode } from "../agent/computer";
+import { CLAUDE_LOCAL_PROVIDER, CLAUDE_MODEL_OPTIONS } from "../agent/claudeLocal";
 
 interface SettingsProps {
   onBack: () => void;
@@ -181,6 +182,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
   const [embeddingModel, setEmbeddingModel] = useState(initialModel.embeddingModel || "text-embedding-3-small");
   const [extraHeaders, setExtraHeaders] = useState(initialModel.extraHeaders || "");
   const [extraBody, setExtraBody] = useState(initialModel.extraBody || "");
+  const [claudeReadOnlyBuiltins, setClaudeReadOnlyBuiltins] = useState(initialModel.claudeReadOnlyBuiltins ?? false);
   const [modelNotice, setModelNotice] = useState<string | null>(null);
   const [enableMemory, setEnableMemory] = useState(config.enableMemory ?? true);
   const [enablePersonality, setEnablePersonality] = useState(config.enablePersonality ?? true);
@@ -217,6 +219,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
   const [activitySummary, setActivitySummary] = useState<string | null>(null);
 
   const activePreset = useMemo(() => getProviderPreset(provider), [provider]);
+  const isClaudeLocal = provider === CLAUDE_LOCAL_PROVIDER;
 
   const buildConfig = (): Partial<AgentConfig> => ({
     provider,
@@ -231,6 +234,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
     embeddingModel,
     extraHeaders,
     extraBody,
+    claudeReadOnlyBuiltins,
     enableMemory,
     enablePersonality,
     enableSecurity,
@@ -250,6 +254,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
     embeddingModel,
     extraHeaders,
     extraBody,
+    claudeReadOnlyBuiltins,
   });
 
   const loadModelIntoForm = (settings: Partial<ModelSettings>, name: string) => {
@@ -267,6 +272,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
     setEmbeddingModel(settings.embeddingModel || "text-embedding-3-small");
     setExtraHeaders(settings.extraHeaders || "");
     setExtraBody(settings.extraBody || "");
+    setClaudeReadOnlyBuiltins(settings.claudeReadOnlyBuiltins ?? false);
     setTestResult(null);
     setModelNotice(null);
   };
@@ -539,98 +545,123 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
                   </Field>
                 )}
 
-                <Field label="API Key">
-                  <div className="relative">
-                    <input
-                      type={showKey ? "text" : "password"}
-                      className="input pr-10"
-                      placeholder={activePreset.apiKeyPlaceholder || "sk-..."}
-                      value={apiKey}
-                      onChange={(event) => setApiKey(event.target.value)}
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowKey((value) => !value)}
-                      aria-label={showKey ? "隐藏 Key" : "显示 Key"}
-                      title={showKey ? "隐藏 Key" : "显示 Key"}
-                      className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg"
+                {isClaudeLocal ? (
+                  <>
+                    <Field label="模型" hint="Opus 能力最强，Sonnet 更快，Haiku 最省用量。">
+                      <select className="input" value={model} onChange={(event) => setModel(event.target.value)}>
+                        {CLAUDE_MODEL_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <SettingRow
+                      title="允许 Claude 自带的只读工具"
+                      description="读文件、搜索文件、联网搜索和抓取网页。命令行和改文件仍然只能通过桌宠的电脑控制，按审批规则确认。"
                     >
-                      {showKey ? <EyeOff size={15} /> : <Eye size={15} />}
-                    </button>
-                  </div>
-                </Field>
-
-                <div className="grid gap-4 sm:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-                  <Field label="接口地址（Base URL）">
-                    <input className="input" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} spellCheck={false} />
+                      <Switch label="允许 Claude 自带的只读工具" checked={claudeReadOnlyBuiltins} onChange={setClaudeReadOnlyBuiltins} />
+                    </SettingRow>
+                    <p className="text-xs leading-relaxed text-fg-muted">
+                      桌宠的工具（电脑控制、待办日程、活动时间线、自动任务等）全部可用。用量算在你自己的 Claude 订阅里；为了不额外消耗，记忆整理、剪贴板分析这类后台任务不会调用 Claude。
+                    </p>
+                  </>
+                ) : (
+                  <>
+                  <Field label="API Key">
+                    <div className="relative">
+                      <input
+                        type={showKey ? "text" : "password"}
+                        className="input pr-10"
+                        placeholder={activePreset.apiKeyPlaceholder || "sk-..."}
+                        value={apiKey}
+                        onChange={(event) => setApiKey(event.target.value)}
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowKey((value) => !value)}
+                        aria-label={showKey ? "隐藏 Key" : "显示 Key"}
+                        title={showKey ? "隐藏 Key" : "显示 Key"}
+                        className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg"
+                      >
+                        {showKey ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
                   </Field>
-                  <Field label="模型名">
-                    <input className="input" value={model} onChange={(event) => setModel(event.target.value)} spellCheck={false} />
-                  </Field>
-                </div>
 
-                <div className="grid gap-4 border-t border-line pt-4 sm:grid-cols-2">
-                  <Field label={`随机性（Temperature）：${temperature}`} hint="越低越稳定，越高越有创意。">
-                    <input
-                      type="range"
-                      min={0}
-                      max={2}
-                      step={0.1}
-                      className="w-full"
-                      value={temperature}
-                      onChange={(event) => setTemperature(Number(event.target.value))}
-                    />
-                  </Field>
-                  <Field label="单次回复上限（Max Tokens）">
-                    <input
-                      type="number"
-                      min={1}
-                      step={256}
-                      className="input"
-                      value={maxTokens}
-                      onChange={(event) => setMaxTokens(Number(event.target.value))}
-                    />
-                  </Field>
-                </div>
-
-                <div className="space-y-3">
-                  <SettingRow title="流式输出" description="边生成边显示。个别服务商不支持时关掉。">
-                    <Switch label="流式输出" checked={stream} onChange={setStream} />
-                  </SettingRow>
-                  <SettingRow title="工具调用" description="允许模型搜索、管理待办、打开应用等。模型不支持时关掉。">
-                    <Switch label="工具调用" checked={enableTools} onChange={setEnableTools} />
-                  </SettingRow>
-                </div>
-
-                <details className="group rounded-lg border border-line">
-                  <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2.5 text-sm text-fg">
-                    高级选项
-                    <ChevronDown size={16} className="text-fg-muted transition group-open:rotate-180" />
-                  </summary>
-                  <div className="space-y-4 border-t border-line px-3 py-3">
-                    <Field label="Embedding 模型" hint="用于记忆的语义检索；服务商不支持时会自动跳过。">
-                      <input className="input" value={embeddingModel} onChange={(event) => setEmbeddingModel(event.target.value)} />
+                  <div className="grid gap-4 sm:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+                    <Field label="接口地址（Base URL）">
+                      <input className="input" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} spellCheck={false} />
                     </Field>
-                    <Field label="额外请求头（JSON）">
-                      <textarea
-                        className="input min-h-[72px] resize-y font-mono text-xs"
-                        placeholder='{"HTTP-Referer":"https://paw.local"}'
-                        value={extraHeaders}
-                        onChange={(event) => setExtraHeaders(event.target.value)}
+                    <Field label="模型名">
+                      <input className="input" value={model} onChange={(event) => setModel(event.target.value)} spellCheck={false} />
+                    </Field>
+                  </div>
+
+                  <div className="grid gap-4 border-t border-line pt-4 sm:grid-cols-2">
+                    <Field label={`随机性（Temperature）：${temperature}`} hint="越低越稳定，越高越有创意。">
+                      <input
+                        type="range"
+                        min={0}
+                        max={2}
+                        step={0.1}
+                        className="w-full"
+                        value={temperature}
+                        onChange={(event) => setTemperature(Number(event.target.value))}
                       />
                     </Field>
-                    <Field label="额外请求体（JSON）">
-                      <textarea
-                        className="input min-h-[72px] resize-y font-mono text-xs"
-                        placeholder='{"top_p":0.9}'
-                        value={extraBody}
-                        onChange={(event) => setExtraBody(event.target.value)}
+                    <Field label="单次回复上限（Max Tokens）">
+                      <input
+                        type="number"
+                        min={1}
+                        step={256}
+                        className="input"
+                        value={maxTokens}
+                        onChange={(event) => setMaxTokens(Number(event.target.value))}
                       />
                     </Field>
                   </div>
-                </details>
+
+                  <div className="space-y-3">
+                    <SettingRow title="流式输出" description="边生成边显示。个别服务商不支持时关掉。">
+                      <Switch label="流式输出" checked={stream} onChange={setStream} />
+                    </SettingRow>
+                    <SettingRow title="工具调用" description="允许模型搜索、管理待办、打开应用等。模型不支持时关掉。">
+                      <Switch label="工具调用" checked={enableTools} onChange={setEnableTools} />
+                    </SettingRow>
+                  </div>
+
+                  <details className="group rounded-lg border border-line">
+                    <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2.5 text-sm text-fg">
+                      高级选项
+                      <ChevronDown size={16} className="text-fg-muted transition group-open:rotate-180" />
+                    </summary>
+                    <div className="space-y-4 border-t border-line px-3 py-3">
+                      <Field label="Embedding 模型" hint="用于记忆的语义检索；服务商不支持时会自动跳过。">
+                        <input className="input" value={embeddingModel} onChange={(event) => setEmbeddingModel(event.target.value)} />
+                      </Field>
+                      <Field label="额外请求头（JSON）">
+                        <textarea
+                          className="input min-h-[72px] resize-y font-mono text-xs"
+                          placeholder='{"HTTP-Referer":"https://paw.local"}'
+                          value={extraHeaders}
+                          onChange={(event) => setExtraHeaders(event.target.value)}
+                        />
+                      </Field>
+                      <Field label="额外请求体（JSON）">
+                        <textarea
+                          className="input min-h-[72px] resize-y font-mono text-xs"
+                          placeholder='{"top_p":0.9}'
+                          value={extraBody}
+                          onChange={(event) => setExtraBody(event.target.value)}
+                        />
+                      </Field>
+                    </div>
+                  </details>
+                  </>
+                )}
 
                 {testResult && <Notice tone={testOk ? "success" : "error"}>{testResult}</Notice>}
                 {modelNotice && <Notice tone="success">{modelNotice}</Notice>}

@@ -21,6 +21,7 @@ export const MODEL_FIELDS = [
   "embeddingModel",
   "extraHeaders",
   "extraBody",
+  "claudeReadOnlyBuiltins",
 ] as const;
 
 export type ModelSettings = Pick<AgentConfig, (typeof MODEL_FIELDS)[number]>;
