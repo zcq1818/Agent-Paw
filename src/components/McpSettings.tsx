@@ -36,18 +36,6 @@ interface Example {
 /** 常用服务，点一下填进表单（只填表单，不会自动安装或连接）。 */
 const EXAMPLES: Example[] = [
   {
-    label: "Jira / Confluence",
-    draft: { name: "Jira", transport: "http", url: "https://mcp.atlassian.com/v1/mcp/authv2" },
-    guide:
-      "Atlassian 官方 MCP。保存后会打开浏览器，用你的 Atlassian 账号登录并点同意即可，不需要填令牌。公司账号如果连不上，可能要管理员在 Atlassian 后台允许 Rovo MCP。",
-  },
-  {
-    label: "Slack",
-    draft: { name: "Slack", transport: "http", url: "https://mcp.slack.com/mcp", showOAuth: true },
-    guide:
-      "Slack 官方 MCP 不支持自动注册，需要先在 api.slack.com/apps 建一个内部应用：在 Agents & AI Apps 里打开 MCP，在 OAuth & Permissions 里加上下面的回调地址和需要的 User Token Scopes，再把 Client ID / Client Secret 填到这里。公司工作区一般需要管理员批准这个应用。",
-  },
-  {
     label: "文件系统",
     draft: { name: "文件系统", transport: "stdio", command: "npx", args: "-y @modelcontextprotocol/server-filesystem D:/文档" },
   },
@@ -58,15 +46,6 @@ const EXAMPLES: Example[] = [
   {
     label: "浏览器（Playwright）",
     draft: { name: "浏览器", transport: "stdio", command: "npx", args: "-y @playwright/mcp@latest" },
-  },
-  {
-    label: "GitHub",
-    draft: {
-      name: "GitHub",
-      transport: "http",
-      url: "https://api.githubcopilot.com/mcp/",
-      headers: "Authorization: Bearer 你的 GitHub 令牌",
-    },
   },
 ];
 
@@ -355,6 +334,212 @@ function needsLogin(error?: string) {
   return Boolean(error && /需要登录|登录已过期|点“登录授权”/.test(error));
 }
 
+/** 内置服务的配置 id 前缀：和用户自己添加的服务分开显示。 */
+const BUILTIN_PREFIX = "mcp_builtin_";
+
+interface Connector {
+  key: string;
+  name: string;
+  description: string;
+  url: string;
+  /** oauth：点连接直接打开浏览器授权；slack：要先填自建应用；token：要填访问令牌 */
+  auth: "oauth" | "slack" | "token";
+  guide?: string;
+  tokenHint?: string;
+}
+
+/** 内置的常用服务：都是官方的远程 MCP。 */
+const CONNECTORS: Connector[] = [
+  {
+    key: "atlassian",
+    name: "Jira / Confluence",
+    description: "查、建、改 Jira 工作项，读写 Confluence 页面",
+    url: "https://mcp.atlassian.com/v1/mcp/authv2",
+    auth: "oauth",
+  },
+  {
+    key: "notion",
+    name: "Notion",
+    description: "搜索、阅读、编辑 Notion 页面和数据库",
+    url: "https://mcp.notion.com/mcp",
+    auth: "oauth",
+  },
+  {
+    key: "linear",
+    name: "Linear",
+    description: "查看和更新 Linear 的问题、项目",
+    url: "https://mcp.linear.app/mcp",
+    auth: "oauth",
+  },
+  {
+    key: "slack",
+    name: "Slack",
+    description: "搜索消息、读频道、发消息",
+    url: "https://mcp.slack.com/mcp",
+    auth: "slack",
+    guide:
+      "Slack 不支持自动注册，要先在 api.slack.com/apps 建一个内部应用：在 Agents & AI Apps 里打开 MCP，在 OAuth & Permissions 里加上回调地址和 User Token Scopes，再把 Client ID / Secret 填在这里。公司工作区一般要管理员批准。",
+  },
+  {
+    key: "github",
+    name: "GitHub",
+    description: "仓库、Issue、PR、代码搜索",
+    url: "https://api.githubcopilot.com/mcp/",
+    auth: "token",
+    tokenHint: "在 GitHub → Settings → Developer settings → Personal access tokens 生成一个令牌，粘贴到这里",
+  },
+];
+
+function ConnectorCard({
+  connector,
+  server,
+  info,
+  busy,
+  loginStatus,
+  loginError,
+  onConnect,
+  onRelogin,
+  onDisconnect,
+  onToggle,
+  onCancel,
+}: {
+  connector: Connector;
+  server?: McpServerConfig;
+  info?: { tools: unknown[]; error?: string; updatedAt?: string };
+  busy: boolean;
+  loginStatus?: string;
+  loginError?: string;
+  onConnect: (extra: { clientId?: string; clientSecret?: string; token?: string }) => void;
+  onRelogin: () => void;
+  onDisconnect: () => void;
+  onToggle: (enabled: boolean) => void;
+  onCancel: () => void;
+}) {
+  const [form, setForm] = useState(false);
+  const [clientId, setClientId] = useState(server?.oauth?.clientId || "");
+  const [clientSecret, setClientSecret] = useState(server?.oauth?.clientSecret || "");
+  const [token, setToken] = useState("");
+  const connected = Boolean(server && info?.updatedAt && !info?.error);
+  const error = loginError || (server ? info?.error : "");
+
+  const start = () => {
+    if (connector.auth === "oauth") onConnect({});
+    else setForm(true);
+  };
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-3">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sidebar text-sm font-semibold text-sidebar-fg">
+          {connector.name.slice(0, 1)}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate text-sm font-medium text-fg">{connector.name}</span>
+            {connected && <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary-ink">已连接</span>}
+          </div>
+          <div className="text-xs text-fg-muted">{connector.description}</div>
+        </div>
+        {server && <Switch label={`启用 ${connector.name}`} checked={server.enabled} onChange={onToggle} />}
+      </div>
+
+      <div className="text-xs">
+        {loginStatus ? (
+          <span className="text-primary-ink">{loginStatus}</span>
+        ) : busy ? (
+          <span className="text-fg-muted">连接中…</span>
+        ) : error ? (
+          <span className="text-danger">✕ {error}</span>
+        ) : connected ? (
+          <span className="text-success">✓ {info?.tools.length} 个工具，聊天时直接说就能用</span>
+        ) : null}
+      </div>
+
+      {form && !connected && (
+        <div className="space-y-2 rounded-lg bg-surface-2 p-2.5">
+          {connector.guide && <p className="text-[11px] leading-relaxed text-fg-muted">{connector.guide}</p>}
+          {connector.auth === "slack" ? (
+            <>
+              <div className="text-[11px] text-fg-muted">
+                回调地址：<code className="select-all font-mono text-fg">{redirectUri(DEFAULT_OAUTH_PORT)}</code>
+              </div>
+              <input className="input h-8 w-full font-mono text-xs" placeholder="Client ID" value={clientId} onChange={(e) => setClientId(e.target.value)} />
+              <input
+                className="input h-8 w-full font-mono text-xs"
+                type="password"
+                placeholder="Client Secret"
+                value={clientSecret}
+                onChange={(e) => setClientSecret(e.target.value)}
+              />
+            </>
+          ) : (
+            <>
+              <p className="text-[11px] leading-relaxed text-fg-muted">{connector.tokenHint}</p>
+              <input
+                className="input h-8 w-full font-mono text-xs"
+                type="password"
+                placeholder="ghp_… 或 github_pat_…"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+              />
+            </>
+          )}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={connector.auth === "slack" ? !clientId.trim() || !clientSecret.trim() : !token.trim()}
+              onClick={() => {
+                setForm(false);
+                onConnect({ clientId: clientId.trim(), clientSecret: clientSecret.trim(), token: token.trim() });
+              }}
+            >
+              {connector.auth === "slack" ? "去授权" : "连接"}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setForm(false)}>
+              取消
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-auto flex gap-2">
+        {loginStatus ? (
+          <Button size="sm" variant="ghost" onClick={onCancel}>
+            取消
+          </Button>
+        ) : !server ? (
+          !form && (
+            <Button size="sm" variant="primary" onClick={start}>
+              <KeyRound size={14} />
+              连接
+            </Button>
+          )
+        ) : (
+          <>
+            {!connected && connector.auth !== "token" && (
+              <Button size="sm" variant="primary" disabled={busy} onClick={onRelogin}>
+                <KeyRound size={14} />
+                {error ? "重新登录" : "登录授权"}
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                if (confirm(`断开 ${connector.name}？桌宠会删掉本机保存的登录信息。`)) onDisconnect();
+              }}
+            >
+              <LogOut size={14} />
+              断开
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** 设置 → MCP 服务。 */
 export function McpServersCard() {
   const servers = useMcpStore((s) => s.servers);
@@ -392,6 +577,28 @@ export function McpServersCard() {
     }
   };
 
+  /** 内置服务：点“连接”就建好配置，需要登录的直接打开浏览器授权。 */
+  const connectBuiltin = async (connector: Connector, extra: { clientId?: string; clientSecret?: string; token?: string }) => {
+    const id = `${BUILTIN_PREFIX}${connector.key}`;
+    const server: McpServerConfig = {
+      id,
+      name: connector.name,
+      transport: "http",
+      enabled: true,
+      url: connector.url,
+      headers: connector.auth === "token" && extra.token ? { Authorization: `Bearer ${extra.token}` } : undefined,
+      oauth: connector.auth === "slack" ? { clientId: extra.clientId, clientSecret: extra.clientSecret } : undefined,
+    };
+    save(server);
+    if (connector.auth === "token") {
+      await refresh(id);
+    } else {
+      await startLogin(server);
+    }
+  };
+
+  const customServers = servers.filter((server) => !server.id.startsWith(BUILTIN_PREFIX));
+
   const saveAndConnect = async (server: McpServerConfig) => {
     const previous = servers.find((item) => item.id === server.id);
     const saved = { ...server, enabled: previous ? previous.enabled : true };
@@ -405,8 +612,8 @@ export function McpServersCard() {
 
   return (
     <Card
-      title="外部 MCP 服务"
-      description="接入现成的 MCP 工具服务（Jira、Slack、文件、浏览器……），桌宠聊天时就能直接用。网址方式支持登录授权；本机命令需要先装好 Node.js 或 Python。"
+      title="MCP 服务"
+      description="接入 Jira、Notion、Slack 等工具，桌宠聊天时就能直接查、直接改。"
       actions={
         <div className="flex gap-2">
           <Button size="sm" variant="ghost" onClick={() => { setImporting(true); setEditing(null); }}>
@@ -419,6 +626,37 @@ export function McpServersCard() {
         </div>
       }
     >
+      <div className="space-y-2">
+        <div className="text-sm font-medium text-fg">常用服务</div>
+        <p className="text-xs text-fg-muted">点“连接”，在浏览器里登录并同意，回来就能在聊天里用。</p>
+        <div className="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {CONNECTORS.map((connector) => {
+            const id = `${BUILTIN_PREFIX}${connector.key}`;
+            const server = servers.find((item) => item.id === id);
+            return (
+              <ConnectorCard
+                key={connector.key}
+                connector={connector}
+                server={server}
+                info={state[id]}
+                busy={Boolean(busy[id])}
+                loginStatus={login?.id === id ? login.status : undefined}
+                loginError={loginError[id]}
+                onConnect={(extra) => void connectBuiltin(connector, extra)}
+                onRelogin={() => server && void startLogin(server)}
+                onDisconnect={() => {
+                  remove(id);
+                  setLoginError((current) => ({ ...current, [id]: "" }));
+                }}
+                onToggle={(enabled) => setEnabled(id, enabled)}
+                onCancel={cancelMcpLogin}
+              />
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="pt-2 text-sm font-medium text-fg">其他服务</div>
       {editing && !editing.id && (
         <ServerForm
           initial={editing}
@@ -437,11 +675,11 @@ export function McpServersCard() {
         />
       )}
 
-      {servers.length === 0 && !editing && !importing ? (
-        <p className="text-xs text-fg-muted">还没有接入。点“添加”选 Jira、Slack 等常用服务，或把别的软件里的 MCP 配置粘贴进来。</p>
+      {customServers.length === 0 && !editing && !importing ? (
+        <p className="text-xs text-fg-muted">别的 MCP 服务（本机命令或网址）点右上角“添加”，或把别的软件里的 MCP 配置粘贴进来。</p>
       ) : (
         <ul className="divide-y divide-line rounded-lg border border-line">
-          {servers.map((server) => {
+          {customServers.map((server) => {
             const info = state[server.id];
             const loading = Boolean(busy[server.id]);
             const isOpen = Boolean(expanded[server.id]);

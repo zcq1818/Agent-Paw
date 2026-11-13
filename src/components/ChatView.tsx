@@ -305,6 +305,19 @@ export function ChatView({ onOpenSidebar, onOpenSettings }: ChatViewProps) {
                 onContinue={continueLast}
               />
             ))}
+            {/* 最后一条是你的消息却没有回复（被打断、窗口卡住、请求丢了）：给个重新发送，不让人以为卡死了 */}
+            {!isStreaming && !search && messages.length > 0 && messages[messages.length - 1].role === "user" && (
+              <div className="flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-2.5 text-sm text-fg-muted">
+                <span className="min-w-0 flex-1">这条消息没有收到回复。</span>
+                <button
+                  type="button"
+                  onClick={() => void retryLast()}
+                  className="shrink-0 rounded-lg bg-primary px-3 py-1 text-xs font-medium text-primary-fg hover:brightness-110"
+                >
+                  重新发送
+                </button>
+              </div>
+            )}
             {isStreaming && !search && (
               <ChatMessage
                 message={{
@@ -332,7 +345,9 @@ export function ChatView({ onOpenSidebar, onOpenSettings }: ChatViewProps) {
               onKeyDown={handleKeyDown}
               placeholder={
                 isStreaming
-                  ? `${runningToolName ? `正在${toolActionLabel(runningToolName)}` : "正在回复"}，可以继续输入补充…`
+                  ? currentToolRuns.some((run) => run.status === "pending")
+                    ? "等你在上面的卡片里确认（允许 / 拒绝）…"
+                    : `${runningToolName ? `正在${toolActionLabel(runningToolName)}` : "正在回复"}，可以继续输入补充…`
                   : `给${activeBot?.name || "皮卡丘"}发消息，Enter 发送，Shift + Enter 换行`
               }
               rows={1}
