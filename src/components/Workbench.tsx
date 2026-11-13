@@ -5,10 +5,14 @@ import {
   Activity,
   Brain,
   EyeOff,
+  Check,
+  Eye,
   ListTodo,
   MessagesSquare,
   Network,
+  Plug,
   Plus,
+  SlidersHorizontal,
   ScrollText,
   Settings as SettingsIcon,
   Sparkles,
@@ -32,6 +36,7 @@ import { ProductivityPanel } from "./ProductivityPanel";
 import { ActivityPanel } from "./ActivityPanel";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { useElementWidth } from "./ui";
+import { McpServersCard } from "./McpSettings";
 
 export type WorkbenchView =
   | "chat"
@@ -43,6 +48,7 @@ export type WorkbenchView =
   | "tasks"
   | "activity"
   | "logs"
+  | "mcp"
   | "settings";
 
 const NAV_GROUPS: Array<{ title: string; items: Array<{ view: WorkbenchView; label: string; icon: ReactNode }> }> = [
@@ -52,6 +58,7 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ view: WorkbenchView; lab
       { view: "team", label: "团队", icon: <Users size={16} /> },
       { view: "rooms", label: "房间", icon: <MessagesSquare size={16} /> },
       { view: "chief", label: "总管", icon: <Network size={16} /> },
+      { view: "mcp", label: "MCP 服务", icon: <Plug size={16} /> },
     ],
   },
   {
@@ -65,6 +72,49 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ view: WorkbenchView; lab
     ],
   },
 ];
+
+/** 侧边栏里用户选择隐藏的入口（只存 view 名）。设置始终显示。 */
+const SIDEBAR_HIDDEN_KEY = "paw_sidebar_hidden";
+
+function loadHiddenNav(): WorkbenchView[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(SIDEBAR_HIDDEN_KEY) || "[]");
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHiddenNav(hidden: WorkbenchView[]) {
+  try {
+    localStorage.setItem(SIDEBAR_HIDDEN_KEY, JSON.stringify(hidden));
+  } catch {}
+}
+
+/** 侧边栏里的“MCP 服务”入口：直接管理外部服务，不用进设置找。 */
+function McpPage({ onClose, onOpenSidebar }: { onClose: () => void; onOpenSidebar?: () => void }) {
+  return (
+    <div className="flex h-screen flex-col bg-app">
+      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface px-4">
+        <button
+          type="button"
+          onClick={onOpenSidebar || onClose}
+          className="text-fg-muted transition hover:text-fg"
+          aria-label={onOpenSidebar ? "打开侧边栏" : "返回聊天"}
+        >
+          ←
+        </button>
+        <div className="font-semibold text-fg">MCP 服务</div>
+        <span className="text-xs text-fg-muted">接入 Jira、Slack 等外部工具，桌宠聊天时就能用</span>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+        <div className="mx-auto max-w-4xl">
+          <McpServersCard />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /** 窄于这个宽度时侧边栏收起成抽屉。 */
 const SIDEBAR_BREAKPOINT = 760;
@@ -154,6 +204,9 @@ export function Workbench() {
     case "logs":
       content = <DiagnosticsPanel onClose={backToChat} />;
       break;
+    case "mcp":
+      content = <McpPage onClose={backToChat} onOpenSidebar={openSidebar} />;
+      break;
   }
 
   const sidebar = (
@@ -195,6 +248,18 @@ function Sidebar({
   onClose?: () => void;
 }) {
   const activeBot = useBotStore((state) => getActiveBot(state));
+  const [hidden, setHidden] = useState<WorkbenchView[]>(loadHiddenNav);
+  const [customizing, setCustomizing] = useState(false);
+  const updateHidden = (next: WorkbenchView[]) => {
+    setHidden(next);
+    saveHiddenNav(next);
+  };
+  const toggleHidden = (target: WorkbenchView) =>
+    setHidden((current) => {
+      const next = current.includes(target) ? current.filter((item) => item !== target) : [...current, target];
+      saveHiddenNav(next);
+      return next;
+    });
   const conversations = useChatStore((state) => state.conversations);
   const activeConversationId = useChatStore((state) => state.activeConversationId);
   const createConversation = useChatStore((state) => state.createConversation);
@@ -273,15 +338,75 @@ function Sidebar({
       </div>
 
       <nav className="border-t border-white/10 px-2 py-3">
-        {NAV_GROUPS.map((group) => (
-          <div key={group.title} className="mb-2">
-            <div className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-sidebar-muted">{group.title}</div>
-            {group.items.map((item) => (
-              <NavItem key={item.view} active={view === item.view} icon={item.icon} label={item.label} onClick={() => onNavigate(item.view)} />
-            ))}
+        {NAV_GROUPS.map((group) => {
+          const items = customizing ? group.items : group.items.filter((item) => !hidden.includes(item.view));
+          if (items.length === 0) return null;
+          return (
+            <div key={group.title} className="mb-2">
+              <div className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-sidebar-muted">{group.title}</div>
+              {items.map((item) =>
+                customizing ? (
+                  <button
+                    key={item.view}
+                    type="button"
+                    onClick={() => toggleHidden(item.view)}
+                    className={`flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-sm transition hover:bg-sidebar-hover ${
+                      hidden.includes(item.view) ? "text-sidebar-muted/60 line-through" : "text-sidebar-fg"
+                    }`}
+                    title={hidden.includes(item.view) ? "点一下显示" : "点一下隐藏"}
+                  >
+                    <span
+                      className={`flex h-4 w-4 items-center justify-center rounded border ${
+                        hidden.includes(item.view) ? "border-sidebar-muted/50" : "border-primary bg-primary text-primary-fg"
+                      }`}
+                    >
+                      {!hidden.includes(item.view) && <Check size={11} strokeWidth={3} />}
+                    </span>
+                    {item.icon}
+                    {item.label}
+                  </button>
+                ) : (
+                  <NavItem key={item.view} active={view === item.view} icon={item.icon} label={item.label} onClick={() => onNavigate(item.view)} />
+                )
+              )}
+            </div>
+          );
+        })}
+        <div className="flex items-center gap-1">
+          <div className="min-w-0 flex-1">
+            <NavItem active={view === "settings"} icon={<SettingsIcon size={16} />} label="设置" onClick={() => onNavigate("settings")} />
           </div>
-        ))}
-        <NavItem active={view === "settings"} icon={<SettingsIcon size={16} />} label="设置" onClick={() => onNavigate("settings")} />
+          {customizing ? (
+            <button
+              type="button"
+              onClick={() => setCustomizing(false)}
+              className="flex h-8 shrink-0 items-center gap-1 rounded-lg bg-primary px-2.5 text-xs font-medium text-primary-fg hover:brightness-110"
+            >
+              完成
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setCustomizing(true)}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sidebar-muted transition hover:bg-sidebar-hover hover:text-sidebar-fg"
+              title="自定义侧边栏：选择显示哪些入口"
+              aria-label="自定义侧边栏"
+            >
+              <SlidersHorizontal size={15} />
+            </button>
+          )}
+        </div>
+        {customizing && (
+          <div className="mt-2 flex items-center justify-between px-2 text-[11px] text-sidebar-muted">
+            <span>勾选的入口会显示在侧边栏</span>
+            {hidden.length > 0 && (
+              <button type="button" className="flex items-center gap-1 hover:text-sidebar-fg" onClick={() => updateHidden([])}>
+                <Eye size={12} />
+                全部显示
+              </button>
+            )}
+          </div>
+        )}
       </nav>
     </aside>
   );

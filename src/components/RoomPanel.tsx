@@ -1,9 +1,12 @@
-import { useMemo, useState } from "react";
-import { askBot, resolveTargets, type RoomHistoryItem } from "../agent/rooms";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUp, Square } from "lucide-react";
+import { askBot, isRoomSkip, resolveTargets, type RoomHistoryItem } from "../agent/rooms";
 import { useBotStore } from "../store/bots";
 import { useRoomStore } from "../store/rooms";
 import { BotAvatar } from "./BotAvatar";
 import { useThemeClass } from "../store/theme";
+
+const MarkdownContent = lazy(() => import("./MarkdownContent").then((module) => ({ default: module.MarkdownContent })));
 
 interface RoomPanelProps {
   onClose: () => void;
@@ -26,8 +29,11 @@ export function RoomPanel({ onClose }: RoomPanelProps) {
   const [input, setInput] = useState("");
   const [newRoomName, setNewRoomName] = useState("");
   const [pendingBot, setPendingBot] = useState("");
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const availableBots = useMemo(() => bots.filter((bot) => !bot.archived), [bots]);
   const room = rooms.find((item) => item.id === activeRoomId);
@@ -39,6 +45,12 @@ export function RoomPanel({ onClose }: RoomPanelProps) {
     () => (room ? allMessages.filter((message) => message.roomId === room.id) : []),
     [room, allMessages]
   );
+
+  // 新消息、正在思考的成员变化时滚到底
+  useEffect(() => {
+    const list = listRef.current;
+    if (list) requestAnimationFrame(() => list.scrollTo({ top: list.scrollHeight, behavior: "smooth" }));
+  }, [roomMessages.length, pendingBot, room?.id]);
 
   const handleCreateRoom = () => {
     createRoom(newRoomName || `房间 ${rooms.length + 1}`, "", availableBots.map((bot) => bot.id));
@@ -77,21 +89,34 @@ export function RoomPanel({ onClose }: RoomPanelProps) {
       mentions: targets.map((bot) => bot.id),
     });
 
-    const history: RoomHistoryItem[] = roomMessages.slice(-8).map((message) => ({
-      role: message.role === "user" ? "user" : "assistant",
-      content: message.content,
-      botName: message.botId
-        ? bots.find((bot) => bot.id === message.botId)?.name
-        : undefined,
-    }));
+    const history: RoomHistoryItem[] = roomMessages
+      .filter((message) => message.role !== "system")
+      .slice(-8)
+      .map((message) => ({
+        role: message.role === "user" ? "user" : "assistant",
+        content: message.content,
+        botName: message.botId ? bots.find((bot) => bot.id === message.botId)?.name : undefined,
+      }));
 
-    for (const bot of targets) {
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const skipped: string[] = [];
+    setProgress({ done: 0, total: targets.length });
+    for (const [index, bot] of targets.entries()) {
+      if (controller.signal.aborted) break;
       setPendingBot(bot.name);
+      setProgress({ done: index, total: targets.length });
       try {
-        const reply = await askBot(bot, text, history, room.name);
-        appendMessage({ roomId: room.id, role: "assistant", botId: bot.id, content: reply });
-        history.push({ role: "assistant", content: reply, botName: bot.name });
+        const reply = await askBot(bot, text, history, room.name, controller.signal, room.topic);
+        // 和自己职责无关的成员回 [跳过]，不刷屏；只问了一个人时照样显示
+        if (isRoomSkip(reply) && targets.length > 1) {
+          skipped.push(bot.name);
+        } else {
+          appendMessage({ roomId: room.id, role: "assistant", botId: bot.id, content: reply });
+          history.push({ role: "assistant", content: reply, botName: bot.name });
+        }
       } catch (cause) {
+        if (controller.signal.aborted) break;
         appendMessage({
           roomId: room.id,
           role: "assistant",
@@ -100,8 +125,16 @@ export function RoomPanel({ onClose }: RoomPanelProps) {
         });
       }
     }
+    const notes: string[] = [];
+    if (skipped.length) notes.push(`${skipped.join("、")} 觉得这个问题不归自己管，没有发言`);
+    if (controller.signal.aborted) notes.push("已停止，后面的成员没有发言");
+    if (notes.length) appendMessage({ roomId: room.id, role: "system", content: `${notes.join("；")}。` });
+    abortRef.current = null;
     setPendingBot("");
+    setProgress(null);
   };
+
+  const pendingProfile = memberBots.find((bot) => bot.name === pendingBot);
 
   return (
     <div className={`chat-window ${themeClass} flex h-screen flex-col`}>
@@ -111,7 +144,7 @@ export function RoomPanel({ onClose }: RoomPanelProps) {
         </button>
         <div>
           <div className="font-semibold">团队房间</div>
-          <div className="text-xs ui-muted">多个 Bot 在同一话题下协作，用 @ 指派</div>
+          <div className="text-xs ui-muted">多个成员在同一话题下协作，用 @ 指派</div>
         </div>
         <span className="ml-auto text-xs ui-muted">{rooms.length} 个房间</span>
       </div>
@@ -145,9 +178,7 @@ export function RoomPanel({ onClose }: RoomPanelProps) {
                 }`}
               >
                 <span className="truncate text-sm">{item.name}</span>
-                <span className="truncate text-xs ui-muted">
-                  {item.memberBotIds.length} 位成员
-                </span>
+                <span className="truncate text-xs ui-muted">{item.memberBotIds.length} 位成员</span>
               </button>
             ))}
           </div>
@@ -155,23 +186,21 @@ export function RoomPanel({ onClose }: RoomPanelProps) {
 
         <main className="flex flex-1 flex-col overflow-hidden">
           {!room ? (
-            <div className="flex flex-1 items-center justify-center text-sm ui-muted">
-              从左侧新建或选择一个房间。
-            </div>
+            <div className="flex flex-1 items-center justify-center text-sm ui-muted">从左侧新建或选择一个房间。</div>
           ) : (
             <>
-              <div className="flex items-center gap-2 border-b border-gray-700 ui-panel px-4 py-2">
-                <div className="min-w-0">
-                  <div className="truncate font-semibold">{room.name}</div>
-                  <div className="truncate text-xs ui-muted">
-                    成员：{memberBots.map((bot) => bot.name).join("、") || "无"}
+              <div className="flex items-center gap-3 border-b border-line bg-surface px-4 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-semibold text-fg">{room.name}</div>
+                  <div className="truncate text-xs text-fg-muted" title={memberBots.map((bot) => bot.name).join("、")}>
+                    {memberBots.length} 位成员：{memberBots.map((bot) => bot.name).join("、") || "无"}
                   </div>
                 </div>
-                <div className="ml-auto flex gap-2">
+                <div className="flex shrink-0 gap-1.5">
                   <button
                     type="button"
                     onClick={() => setShowSettings(!showSettings)}
-                    className="rounded-lg bg-gray-700 px-3 py-1 text-xs text-gray-100 hover:bg-gray-600"
+                    className="whitespace-nowrap rounded-lg border border-line px-2.5 py-1 text-xs text-fg hover:bg-surface-2"
                   >
                     房间设置
                   </button>
@@ -180,7 +209,7 @@ export function RoomPanel({ onClose }: RoomPanelProps) {
                     onClick={() => {
                       if (confirm("确定清空这个房间的消息吗？")) clearMessages(room.id);
                     }}
-                    className="rounded-lg bg-gray-700 px-3 py-1 text-xs text-gray-100 hover:bg-red-900/60"
+                    className="whitespace-nowrap rounded-lg border border-line px-2.5 py-1 text-xs text-fg hover:bg-surface-2"
                   >
                     清空消息
                   </button>
@@ -189,7 +218,7 @@ export function RoomPanel({ onClose }: RoomPanelProps) {
                     onClick={() => {
                       if (confirm(`确定删除房间「${room.name}」吗？`)) deleteRoom(room.id);
                     }}
-                    className="rounded-lg bg-gray-700 px-3 py-1 text-xs text-gray-100 hover:bg-red-900/60"
+                    className="whitespace-nowrap rounded-lg px-2.5 py-1 text-xs text-danger hover:bg-danger/10"
                   >
                     删除
                   </button>
@@ -197,9 +226,9 @@ export function RoomPanel({ onClose }: RoomPanelProps) {
               </div>
 
               {showSettings && (
-                <div className="space-y-3 border-b border-gray-700 ui-panel px-4 py-3">
+                <div className="space-y-3 border-b border-line bg-surface px-4 py-3">
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="block text-xs ui-muted">
+                    <label className="block text-xs text-fg-muted">
                       房间名
                       <input
                         className="input mt-1"
@@ -207,7 +236,7 @@ export function RoomPanel({ onClose }: RoomPanelProps) {
                         onChange={(event) => updateRoom(room.id, { name: event.target.value })}
                       />
                     </label>
-                    <label className="block text-xs ui-muted">
+                    <label className="block text-xs text-fg-muted">
                       话题 / 共同指令
                       <input
                         className="input mt-1"
@@ -217,10 +246,13 @@ export function RoomPanel({ onClose }: RoomPanelProps) {
                       />
                     </label>
                   </div>
-                  <div className="text-xs ui-muted">成员（勾选后 @ 可单独指派）</div>
+                  <div className="text-xs text-fg-muted">成员（勾选的成员才会在这个房间发言）</div>
                   <div className="flex flex-wrap gap-2">
                     {availableBots.map((bot) => (
-                      <label key={bot.id} className="flex items-center gap-1.5 rounded-lg ui-panel-strong px-2.5 py-1.5 text-xs">
+                      <label
+                        key={bot.id}
+                        className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-fg"
+                      >
                         <input
                           type="checkbox"
                           checked={room.memberBotIds.includes(bot.id)}
@@ -233,82 +265,131 @@ export function RoomPanel({ onClose }: RoomPanelProps) {
                 </div>
               )}
 
-              <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
-                {roomMessages.length === 0 && (
-                  <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm ui-muted">
+              <div ref={listRef} className="flex-1 overflow-y-auto bg-app px-4 py-4">
+                {roomMessages.length === 0 && !pendingBot && (
+                  <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-fg-muted">
                     <span className="text-3xl">💬</span>
-                    <span>发条消息让房间里的 Bot 开始协作</span>
-                    <span className="text-xs">不带 @ 时默认全体成员作答；@名字 只指派指定 Bot</span>
+                    <span>发条消息让房间里的成员开始协作</span>
+                    <span className="text-xs">不带 @ 时全体成员依次作答（和自己无关的会跳过）；@名字 只问指定成员</span>
                   </div>
                 )}
-                {roomMessages.map((message) => {
-                  const isUser = message.role === "user";
-                  const bot = message.botId ? bots.find((item) => item.id === message.botId) : undefined;
-                  return (
-                    <div key={message.id} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-                      <div
-                        className={`max-w-[80%] whitespace-pre-wrap rounded-xl px-3 py-2 text-sm ${
-                          isUser ? "bg-yellow-500 text-gray-900" : "bg-gray-800 text-gray-100"
-                        }`}
-                      >
-                        {!isUser && (
-                          <div className="mb-1 flex items-center gap-1 text-xs text-yellow-300">
-                            {bot && <BotAvatar bot={bot} size={18} />}
-                            {bot?.name || "系统"}
+                <div className="mx-auto max-w-3xl space-y-5">
+                  {roomMessages.map((message) => {
+                    if (message.role === "system") {
+                      return (
+                        <div key={message.id} className="text-center text-xs text-fg-muted">
+                          {message.content}
+                        </div>
+                      );
+                    }
+                    if (message.role === "user") {
+                      return (
+                        <div key={message.id} className="flex justify-end">
+                          <div className="max-w-[80%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm text-primary-fg">
+                            {message.content}
                           </div>
-                        )}
-                        {message.content}
+                        </div>
+                      );
+                    }
+                    const bot = message.botId ? bots.find((item) => item.id === message.botId) : undefined;
+                    const failed = message.content.startsWith("调用失败：");
+                    return (
+                      <div key={message.id} className="flex gap-3">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface ring-1 ring-line">
+                          {bot ? <BotAvatar bot={bot} size={26} /> : <span>🤖</span>}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="mb-1 flex items-center gap-2 text-xs">
+                            <span className="font-medium text-fg">{bot?.name || "成员"}</span>
+                            {bot?.tagline && <span className="truncate text-fg-muted">{bot.tagline}</span>}
+                          </div>
+                          <div
+                            className={`rounded-2xl rounded-tl-md border px-4 py-3 text-sm ${
+                              failed ? "border-danger/30 bg-danger/5 text-danger" : "border-line bg-surface text-fg"
+                            }`}
+                          >
+                            <div className="markdown-body max-w-none">
+                              <Suspense fallback={<div className="whitespace-pre-wrap">{message.content}</div>}>
+                                <MarkdownContent content={message.content} />
+                              </Suspense>
+                            </div>
+                          </div>
+                        </div>
                       </div>
+                    );
+                  })}
+                  {pendingBot && (
+                    <div className="flex items-center gap-3 text-sm text-fg-muted">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface ring-1 ring-line">
+                        {pendingProfile ? <BotAvatar bot={pendingProfile} size={26} /> : null}
+                      </div>
+                      <span className="typing-dots" aria-hidden="true">
+                        <span />
+                        <span />
+                        <span />
+                      </span>
+                      <span>
+                        {pendingBot} 正在想
+                        {progress && progress.total > 1 ? `（第 ${progress.done + 1} / ${progress.total} 位）` : ""}
+                      </span>
                     </div>
-                  );
-                })}
+                  )}
+                </div>
               </div>
 
-              <div className="border-t border-gray-700 ui-panel px-4 py-3">
-                <div className="mb-2 flex flex-wrap items-center gap-1.5">
-                  <span className="text-xs ui-muted">快捷 @：</span>
-                  <button
-                    type="button"
-                    onClick={() => insertMention("全体")}
-                    className="rounded-full bg-gray-700 px-2 py-0.5 text-xs text-gray-300 hover:bg-gray-600"
-                  >
-                    @全体
-                  </button>
-                  {memberBots.map((bot) => (
-                    <button
-                      key={bot.id}
-                      type="button"
-                      onClick={() => insertMention(bot.name)}
-                      className="rounded-full bg-gray-700 px-2 py-0.5 text-xs text-gray-300 hover:bg-gray-600"
-                    >
-                      @{bot.name}
-                    </button>
-                  ))}
-                </div>
-                {error && <div className="mb-2 text-xs text-red-400">{error}</div>}
-                <div className="flex gap-2">
-                  <textarea
-                    value={input}
-                    onChange={(event) => setInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && !event.shiftKey) {
-                        event.preventDefault();
-                        handleSend();
-                      }
-                    }}
-                    rows={1}
-                    placeholder="输入消息，Enter 发送；@名字 指派给指定 Bot"
-                    className="flex-1 resize-none rounded-xl border border-gray-600 bg-gray-800 px-4 py-2.5 placeholder:text-gray-500 focus:border-yellow-500 focus:outline-none"
-                    style={{ maxHeight: 120 }}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSend}
-                    disabled={Boolean(pendingBot) || !input.trim()}
-                    className="rounded-xl bg-yellow-500 px-4 font-bold text-gray-900 hover:bg-yellow-400 disabled:bg-gray-700 disabled:text-gray-500"
-                  >
-                    {pendingBot ? `${pendingBot} 思考中` : "发送"}
-                  </button>
+              <div className="border-t border-line bg-surface px-4 py-3">
+                <div className="mx-auto max-w-3xl">
+                  <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs text-fg-muted">@</span>
+                    {[{ id: "all", name: "全体" }, ...memberBots].map((bot) => (
+                      <button
+                        key={bot.id}
+                        type="button"
+                        onClick={() => insertMention(bot.name)}
+                        className="rounded-full border border-line px-2 py-0.5 text-xs text-fg-muted hover:border-primary hover:text-fg"
+                      >
+                        {bot.name}
+                      </button>
+                    ))}
+                  </div>
+                  {error && <div className="mb-2 text-xs text-danger">{error}</div>}
+                  <div className="flex items-end gap-2 rounded-2xl border border-line bg-surface py-1.5 pl-4 pr-1.5 transition focus-within:border-primary/70 focus-within:ring-4 focus-within:ring-primary/10">
+                    <textarea
+                      value={input}
+                      onChange={(event) => setInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                          event.preventDefault();
+                          handleSend();
+                        }
+                      }}
+                      rows={1}
+                      placeholder={pendingBot ? `${pendingBot} 正在想…` : "发消息，Enter 发送；@名字 只问指定成员"}
+                      className="chat-composer-input block max-h-[120px] min-w-0 flex-1 resize-none border-0 bg-transparent py-1.5 text-sm leading-relaxed text-fg outline-none placeholder:text-fg-muted"
+                    />
+                    {pendingBot ? (
+                      <button
+                        type="button"
+                        onClick={() => abortRef.current?.abort()}
+                        title="停止，后面的成员不再发言"
+                        aria-label="停止"
+                        className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fg text-surface hover:opacity-85"
+                      >
+                        <Square size={12} fill="currentColor" />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleSend}
+                        disabled={!input.trim()}
+                        title="发送（Enter）"
+                        aria-label="发送"
+                        className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-fg hover:brightness-110 disabled:bg-surface-2 disabled:text-fg-muted"
+                      >
+                        <ArrowUp size={17} strokeWidth={2.5} />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </>

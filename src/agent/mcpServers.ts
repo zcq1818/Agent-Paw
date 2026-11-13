@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { fetchExternal } from "./http";
 import { confirmSystemAction, type Tool } from "./tools";
 import { registerToolAction } from "./toolEvents";
+import { clearMcpToken, getMcpToken, refreshMcpToken, validMcpToken, type McpOAuthSettings } from "./mcpOAuth";
 
 /**
  * 外部 MCP 服务：用户在设置里接入的第三方工具（文件系统、GitHub、数据库、浏览器……）。
@@ -28,6 +29,8 @@ export interface McpServerConfig {
   cwd?: string;
   url?: string;
   headers?: Record<string, string>;
+  /** 网址方式的 OAuth 登录设置（Slack 这类需要自建应用时填 Client ID） */
+  oauth?: McpOAuthSettings;
 }
 
 export interface McpToolInfo {
@@ -106,13 +109,22 @@ export const useMcpStore = create<McpStore>((set, get) => {
     reload: () => set({ servers: loadMcpServers(), state: loadMcpState() }),
     save: (server) => {
       const servers = get().servers;
-      const exists = servers.some((item) => item.id === server.id);
+      const previous = servers.find((item) => item.id === server.id);
+      const exists = Boolean(previous);
+      // 地址或应用换了，旧令牌就不能用了
+      if (
+        previous &&
+        (previous.url !== server.url || previous.oauth?.clientId !== server.oauth?.clientId)
+      ) {
+        clearMcpToken(server.id);
+      }
       commitServers(exists ? servers.map((item) => (item.id === server.id ? server : item)) : [...servers, server]);
       void disconnectMcpServer(server.id);
     },
     remove: (id) => {
       commitServers(get().servers.filter((item) => item.id !== id));
       commitState(id, null);
+      clearMcpToken(id);
       void disconnectMcpServer(id);
     },
     setEnabled: (id, enabled) => {
@@ -235,14 +247,33 @@ async function httpPost(
   if (session?.sessionId) headers["Mcp-Session-Id"] = session.sessionId;
   if (session) headers["MCP-Protocol-Version"] = session.protocolVersion;
 
-  const response = await fetchExternal(url, { method: "POST", headers, body: JSON.stringify(body), signal });
+  // 登录授权过的服务带上令牌（请求头里手动填了 Authorization 的以手填为准）
+  const manualAuth = Object.keys(headers).some((key) => key.toLowerCase() === "authorization");
+  const token = manualAuth ? null : await validMcpToken(server.id);
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let response = await fetchExternal(url, { method: "POST", headers, body: JSON.stringify(body), signal });
+  if (response.status === 401 && token) {
+    // 令牌被服务端判定过期：刷新一次再试
+    const refreshed = await refreshMcpToken(server.id);
+    if (refreshed) {
+      headers.Authorization = `Bearer ${refreshed.accessToken}`;
+      response = await fetchExternal(url, { method: "POST", headers, body: JSON.stringify(body), signal });
+    }
+  }
   const sessionId = response.headers.get("mcp-session-id") || undefined;
   if (!("id" in body)) return { message: null, sessionId };
   if (!response.ok) {
     const text = (await response.text().catch(() => "")).slice(0, 200);
     const hint =
-      response.status === 401 || response.status === 403
-        ? "（需要授权：检查请求头里的令牌）"
+      response.status === 401
+        ? manualAuth
+          ? "（请求头里的令牌无效或过期）"
+          : getMcpToken(server.id)
+            ? "（登录已过期，点“登录授权”重新登录）"
+            : "（需要登录：点“登录授权”）"
+        : response.status === 403
+          ? "（没有权限：检查账号权限或令牌范围）"
         : response.status === 404 || response.status === 405
           ? /\/sse\/?$/i.test(url)
             ? "（这是旧版 SSE 地址，桌宠只支持新版 Streamable HTTP，一般把结尾的 /sse 换成 /mcp）"
