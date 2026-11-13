@@ -431,6 +431,7 @@ pub fn run() {
             timeline::timeline_query,
             timeline::timeline_status,
             timeline::timeline_clear,
+            timeline::clipboard_read,
             claude_code::claude_run,
             claude_code::claude_cancel,
             claude_code::claude_tool_result,

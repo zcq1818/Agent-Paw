@@ -779,6 +779,31 @@ pub struct TimelineStatus {
     dir: String,
 }
 
+/// 快捷键“处理刚复制的内容”用：直接读系统剪贴板（不受 WebView 剪贴板权限影响）。
+/// 密码管理器标记为私密的内容不读。
+#[derive(Serialize)]
+pub struct ClipboardContent {
+    kind: &'static str,
+    text: String,
+    files: Vec<String>,
+}
+
+#[tauri::command]
+pub fn clipboard_read() -> ClipboardContent {
+    #[cfg(windows)]
+    {
+        return match sys::read_clipboard() {
+            sys::Clip::Text(text) => ClipboardContent { kind: "text", text: truncate_chars(&text, 20_000), files: vec![] },
+            sys::Clip::Files(files) => ClipboardContent { kind: "files", text: String::new(), files },
+            sys::Clip::Image => ClipboardContent { kind: "image", text: String::new(), files: vec![] },
+            sys::Clip::Private => ClipboardContent { kind: "private", text: String::new(), files: vec![] },
+            sys::Clip::Nothing => ClipboardContent { kind: "empty", text: String::new(), files: vec![] },
+        };
+    }
+    #[allow(unreachable_code)]
+    ClipboardContent { kind: "empty", text: String::new(), files: vec![] }
+}
+
 #[tauri::command]
 pub fn timeline_status() -> Result<TimelineStatus, String> {
     let (enabled, dir) = {

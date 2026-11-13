@@ -728,3 +728,13 @@ textarea.input {
   .mini-streaming > ul:last-child > li:last-child::after,
   .mini-streaming > ol:last-child > li:last-child::after { animation: none; }
 }
+
+/* 工作台聊天输入框：外层容器已经有聚焦效果，里面的 textarea 不再单独加边框和光晕 */
+.themed-ui .chat-composer-input,
+.themed-ui .chat-composer-input:focus,
+.chat-composer-input:focus {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  outline: none;
+}
