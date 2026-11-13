@@ -26,7 +26,12 @@ export function ApprovalOverlay({ compact = false }: { compact?: boolean }) {
   if (pending.length === 0) return null;
 
   return (
-    <div className={`${themeClass} pointer-events-none fixed inset-0 z-50 flex items-end justify-center ${compact ? "p-2" : "p-4"}`}>
+    // 工作台里卡片放在输入框上方，不能盖住输入框（盖住后看不到发送 / 停止按钮，会以为卡死了）
+    <div
+      className={`${themeClass} pointer-events-none fixed inset-0 z-50 flex items-end justify-center ${
+        compact ? "p-2" : "px-4 pb-28 pt-4"
+      }`}
+    >
       <div className="pointer-events-auto w-full max-w-md space-y-3">
         {pending.slice(0, compact ? 1 : 3).map((request) => {
           const bot = bots.find((item) => item.id === request.botId);

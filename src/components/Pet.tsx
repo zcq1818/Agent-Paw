@@ -1422,6 +1422,18 @@ export function Pet() {
                 )}
               </div>
             ))}
+            {!isStreaming && recentMessages.length > 0 && recentMessages[recentMessages.length - 1].role === "user" && (
+              <div className="flex items-center gap-2 rounded-xl bg-surface px-3 py-2 text-xs text-fg-muted">
+                <span className="min-w-0 flex-1">这条消息没有收到回复。</span>
+                <button
+                  type="button"
+                  className="shrink-0 rounded-lg bg-primary px-2.5 py-1 font-medium text-primary-fg"
+                  onClick={() => void useAgentStore.getState().retryLast()}
+                >
+                  重新发送
+                </button>
+              </div>
+            )}
             {isStreaming && <MiniStreamingReply text={streamText} runs={currentToolRuns} />}
           </div>
           <div className="mt-2 flex shrink-0 gap-2">
