@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { customSkillsStore, type CustomSkill } from "../agent/customSkills";
+import { SkillLibraryPanel } from "./SkillLibraryPanel";
 import { useThemeClass } from "../store/theme";
 
 interface CustomSkillsSettingsProps {
@@ -145,22 +146,30 @@ export function CustomSkillsSettings({ onClose }: CustomSkillsSettingsProps) {
           <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
             ←
           </button>
-          <span className="font-semibold text-white">自定义技能管理</span>
+          <span className="font-semibold text-white">技能</span>
         </div>
         <div className="flex items-center gap-2">
-          <label className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg cursor-pointer text-sm transition-colors">
-            导入
+          <label
+            className="cursor-pointer rounded-lg border border-line px-3 py-1.5 text-xs text-fg transition hover:bg-surface-2"
+            title="导入单个 .md 或 .json，加到下面“桌宠内的技能”。整个技能文件夹请放进“桌宠技能文件夹”"
+          >
+            导入单个文件
             <input type="file" accept=".json,.md,.markdown" onChange={handleImport} className="hidden" />
           </label>
           <button
             onClick={() => setShowAddForm(!showAddForm)}
-            className="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg text-sm transition-colors"
+            className="rounded-lg border border-line px-3 py-1.5 text-xs text-fg transition hover:bg-surface-2"
+            title="用表单建一个只有说明文字的简单技能"
           >
-            新建技能
+            新建简单技能
           </button>
         </div>
       </div>
 
+      <div className="flex-1 overflow-y-auto">
+      <SkillLibraryPanel />
+      <div className="px-4 pt-4 text-base font-semibold text-fg">桌宠内的技能</div>
+      <p className="px-4 pb-1 text-xs text-fg-muted">用右上角“新建技能”表单建的简单技能（只有说明文字），和上面的技能一样按需使用。</p>
       <div className="px-4 py-3 bg-gray-800/50 border-b border-gray-700">
         <div className="flex items-center gap-4 text-sm text-gray-300">
           <span>总技能：{stats.total}</span>
@@ -173,7 +182,7 @@ export function CustomSkillsSettings({ onClose }: CustomSkillsSettingsProps) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div>
         {showAddForm && (
           <div className="p-4 bg-gray-800/50 border-b border-gray-700">
             <h3 className="text-lg font-semibold text-white mb-4">
@@ -281,6 +290,7 @@ export function CustomSkillsSettings({ onClose }: CustomSkillsSettingsProps) {
             ))
           )}
         </div>
+      </div>
       </div>
     </div>
   );

@@ -15,7 +15,7 @@ import { usePetStore } from "../store/pet";
 import { formatInterjection, hasInterjections, takeInterjections } from "./interjections";
 import { personalityStore } from "./personality";
 import { securityManager } from "./security";
-import { getSkillsContext } from "./customSkills";
+import { getSkillLibraryTools, skillIndexPrompt, useSkillLibrary } from "./skillLibrary";
 import type { ToolEvent } from "./toolEvents";
 import { BROWSER_USER_AGENT, fetchExternal } from "./http";
 import {
@@ -721,6 +721,7 @@ export function getTools(): Tool[] {
     tools.push(...getTimelineTools());
   }
   tools.push(...getAutomationTools());
+  tools.push(...getSkillLibraryTools());
   tools.push(...getMcpTools());
   return tools;
 }
@@ -809,7 +810,9 @@ export async function streamChat(
     systemPrompt += "\n\n" + memoryContext;
   }
 
-  const skillsContext = getSkillsContext();
+  // 技能按需加载：这里只放技能目录（名字 + 用途），完整说明由模型调用 use_skill 读取
+  await useSkillLibrary.getState().reload().catch(() => {});
+  const skillsContext = skillIndexPrompt();
   if (skillsContext) systemPrompt += "\n\n" + skillsContext;
 
   if (config.enablePersonality !== false) {

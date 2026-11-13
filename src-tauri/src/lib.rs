@@ -8,6 +8,7 @@ mod claude_code;
 mod control;
 mod mcp_client;
 mod oauth_callback;
+mod skills;
 mod ocr;
 mod timeline;
 mod tray;
@@ -446,7 +447,12 @@ pub fn run() {
             mcp_client::mcp_stdio_running,
             oauth_callback::oauth_listen,
             oauth_callback::oauth_wait,
-            oauth_callback::oauth_cancel
+            oauth_callback::oauth_cancel,
+            skills::skills_root,
+            skills::skills_scan,
+            skills::skill_read_file,
+            skills::skill_save,
+            skills::skill_delete
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
