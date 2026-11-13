@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { chatStorageKeys, useChatStore } from "./chat";
 import { ACTIVITY_STORAGE_KEYS, useActivityStore } from "./activity";
 import { PET_CONFIG_KEY, usePetStore } from "./pet";
-import { CHAT_HOTKEY_KEY, useShortcutStore } from "./shortcut";
+import { HOTKEY_STATUS_KEY, HOTKEYS_KEY, useShortcutStore } from "./shortcut";
 import { ACTIVE_MODEL_PROFILE_KEY, MODEL_PROFILES_KEY, useModelProfileStore } from "../agent/modelProfiles";
 
 /**
@@ -27,7 +27,7 @@ export function useCrossWindowSync() {
       if (key === null || key === PET_CONFIG_KEY) {
         usePetStore.getState().syncFromStorage();
       }
-      if (key === null || key === CHAT_HOTKEY_KEY) {
+      if (key === null || key === HOTKEYS_KEY || key === HOTKEY_STATUS_KEY) {
         useShortcutStore.getState().syncFromStorage();
       }
       if (key === null || key === MODEL_PROFILES_KEY || key === ACTIVE_MODEL_PROFILE_KEY) {

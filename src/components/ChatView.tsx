@@ -324,46 +324,43 @@ export function ChatView({ onOpenSidebar, onOpenSettings }: ChatViewProps) {
       {/* 输入框 */}
       <div className="shrink-0 px-3 pb-3 pt-1 sm:px-6 sm:pb-5">
         <div className="mx-auto max-w-3xl">
-          <div className="rounded-2xl border border-line bg-surface shadow-card transition focus-within:border-primary/70 focus-within:ring-4 focus-within:ring-primary/10">
+          <div className="flex items-end gap-2 rounded-2xl border border-line bg-surface py-1.5 pl-4 pr-1.5 shadow-card transition focus-within:border-primary/70 focus-within:ring-4 focus-within:ring-primary/10">
             <textarea
               ref={textareaRef}
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={`给${activeBot?.name || "皮卡丘"}发消息`}
+              placeholder={
+                isStreaming
+                  ? `${runningToolName ? `正在${toolActionLabel(runningToolName)}` : "正在回复"}，可以继续输入补充…`
+                  : `给${activeBot?.name || "皮卡丘"}发消息，Enter 发送，Shift + Enter 换行`
+              }
               rows={1}
-              className="block max-h-[200px] w-full resize-none bg-transparent px-4 pt-3 text-sm leading-relaxed text-fg outline-none placeholder:text-fg-muted"
+              className="chat-composer-input block max-h-[200px] min-w-0 flex-1 resize-none border-0 bg-transparent py-1.5 text-sm leading-relaxed text-fg outline-none placeholder:text-fg-muted"
             />
-            <div className="flex items-center gap-2 px-3 pb-2.5 pt-1">
-              <span className="min-w-0 flex-1 truncate pl-1 text-xs text-fg-muted">
-                {isStreaming
-                  ? `${runningToolName ? `正在${toolActionLabel(runningToolName)}…` : "正在生成…"} 可以继续输入补充，Enter 发送`
-                  : "Enter 发送 · Shift + Enter 换行"}
-              </span>
-              {isStreaming && (
-                <button
-                  type="button"
-                  onClick={stopGeneration}
-                  aria-label="停止生成"
-                  title="停止生成"
-                  className="flex h-8 w-8 items-center justify-center rounded-full bg-fg text-surface transition hover:opacity-85"
-                >
-                  <Square size={12} fill="currentColor" />
-                </button>
-              )}
-              {(!isStreaming || input.trim()) && (
-                <button
-                  type="button"
-                  onClick={handleSend}
-                  disabled={!input.trim()}
-                  aria-label={isStreaming ? "补充给正在进行的任务" : "发送"}
-                  title={isStreaming ? "补充给正在进行的任务" : "发送"}
-                  className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-fg transition hover:brightness-110 disabled:bg-surface-2 disabled:text-fg-muted"
-                >
-                  <ArrowUp size={17} strokeWidth={2.5} />
-                </button>
-              )}
-            </div>
+            {isStreaming && (
+              <button
+                type="button"
+                onClick={stopGeneration}
+                aria-label="停止生成"
+                title="停止生成"
+                className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fg text-surface transition hover:opacity-85"
+              >
+                <Square size={12} fill="currentColor" />
+              </button>
+            )}
+            {(!isStreaming || input.trim()) && (
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={!input.trim()}
+                aria-label={isStreaming ? "补充给正在进行的任务" : "发送"}
+                title={isStreaming ? "补充给正在进行的任务" : "发送（Enter）"}
+                className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-fg transition hover:brightness-110 disabled:bg-surface-2 disabled:text-fg-muted"
+              >
+                <ArrowUp size={17} strokeWidth={2.5} />
+              </button>
+            )}
           </div>
         </div>
       </div>

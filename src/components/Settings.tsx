@@ -57,7 +57,7 @@ import { getActiveBot, useBotStore } from "../store/bots";
 import { usePetStore, SKIN_COLORS, type InteractionFrequency, type PetAvatar, type PetSkin, type RoamScope } from "../store/pet";
 import { THEME_OPTIONS, type AppTheme, useThemeClass, useThemeStore } from "../store/theme";
 import { useActivityStore } from "../store/activity";
-import { DEFAULT_CHAT_HOTKEY, normalizeHotkey, useShortcutStore } from "../store/shortcut";
+import { HotkeySettingsCard } from "./HotkeySettings";
 import { CustomSkillsSettings } from "./CustomSkillsSettings";
 import { AlwaysAllowList, InitiativeCard, TimelineOptions } from "./AssistantSettings";
 import { McpServersCard } from "./McpSettings";
@@ -151,8 +151,6 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
   const setActivityEnabled = useActivityStore((state) => state.setEnabled);
   const getActivitySummary = useActivityStore((state) => state.getSummary);
   const clearActivity = useActivityStore((state) => state.clear);
-  const currentChatHotkey = useShortcutStore((state) => state.chatHotkey);
-  const setChatHotkey = useShortcutStore((state) => state.setChatHotkey);
   const setName = usePetStore((state) => state.setName);
   const setSkin = usePetStore((state) => state.setSkin);
   const setAvatar = usePetStore((state) => state.setAvatar);
@@ -207,7 +205,6 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
   const [quietStart, setQuietStartLocal] = useState(currentQuietStart);
   const [quietEnd, setQuietEndLocal] = useState(currentQuietEnd);
   const [theme, setThemeLocal] = useState<AppTheme>(currentTheme);
-  const [chatHotkeyInput, setChatHotkeyInput] = useState(currentChatHotkey);
 
   const [saved, setSaved] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -354,7 +351,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
       apply(value);
     };
 
-  // 底部“保存设置”只用于「AI 能力」和「快捷键」：不再顺带保存模型编辑器里的内容
+  // 底部“保存设置”只用于「AI 能力」（快捷键改完立即生效）：不再顺带保存模型编辑器里的内容
   // （之前在桌宠页点保存，会把模型表单也存一遍，编辑中的“新模型”会被重复创建）。
   const saveAll = () => {
     saveConfig({ enableMemory, enablePersonality, enableSecurity, enableMultimodal, computerControl });
@@ -374,7 +371,6 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
     setQuietStart(quietStart);
     setQuietEnd(quietEnd);
     setAppTheme(theme);
-    setChatHotkey(chatHotkeyInput);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -909,29 +905,11 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
             </Card>
           )}
 
-          {activeSection === "shortcuts" && (
-            <Card title="快捷键">
-              <Field
-                label="显示 / 隐藏工作台"
-                hint="例如 Ctrl+Shift+P、Alt+Space、CommandOrControl+Shift+K。保存后立即生效。"
-              >
-                <input
-                  className="input font-mono"
-                  value={chatHotkeyInput}
-                  onChange={(event) => setChatHotkeyInput(event.target.value)}
-                  onBlur={() => setChatHotkeyInput(normalizeHotkey(chatHotkeyInput) || DEFAULT_CHAT_HOTKEY)}
-                  placeholder={DEFAULT_CHAT_HOTKEY}
-                />
-              </Field>
-              <SettingRow title="当前生效">
-                <kbd className="rounded-md border border-line bg-surface-2 px-2 py-1 font-mono text-xs text-fg">{currentChatHotkey}</kbd>
-              </SettingRow>
-            </Card>
-          )}
+          {activeSection === "shortcuts" && <HotkeySettingsCard />}
         </div>
       </div>
 
-      {(activeSection === "features" || activeSection === "shortcuts") && (
+      {activeSection === "features" && (
         <footer className="flex shrink-0 items-center justify-end gap-3 border-t border-line bg-surface px-4 py-3 sm:px-6">
           {saved && (
             <span className="flex items-center gap-1 text-xs text-success">

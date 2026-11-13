@@ -966,6 +966,11 @@ export async function streamChat(
         .filter((tc: RuntimeToolCall) => tc.name);
 
       if (!content && nonStreamToolCalls.length === 0) throw new Error("API 返回为空，请检查模型名称、Base URL 或接口格式");
+      if (content && fullText.trim() && !fullText.endsWith("\n\n")) {
+        const gap = fullText.endsWith("\n") ? "\n" : "\n\n";
+        fullText += gap;
+        onChunk(gap);
+      }
       fullText += content;
       if (content) onChunk(content);
 
@@ -1022,6 +1027,12 @@ export async function streamChat(
         if (!delta) return;
 
         if (delta.content) {
+          // 调用工具前后的几段话之间空一行，不然会挤成一大段
+          if (!roundText && fullText.trim() && !fullText.endsWith("\n\n")) {
+            const gap = fullText.endsWith("\n") ? "\n" : "\n\n";
+            fullText += gap;
+            onChunk(gap);
+          }
           roundText += delta.content;
           onChunk(delta.content);
         }

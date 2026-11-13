@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   availableMonitors,
   currentMonitor,
@@ -25,6 +25,7 @@ import { recordOfferFeedback, useInitiative, type Offer } from "../agent/initiat
 import { fetchTodayNews, formatNewsBubble, formatNewsMarkdown } from "../agent/news";
 import { getInteractionByType, getRandomInteraction, getTimeBasedGreeting } from "../utils/petInteractions";
 import { toolActionLabel, type ToolRun } from "../agent/toolEvents";
+import { HOTKEY_EVENT } from "../store/shortcut";
 
 type PetState = "idle" | "walk" | "sit" | "sleep" | "excited" | "thinking" | "morning" | "night" | "dance" | "stretch" | "look" | "wave";
 type Facing = "left" | "right";
@@ -35,7 +36,42 @@ type WorkArea = {
 };
 
 const PET_SIZE = { width: 340, height: 340 };
-const CHAT_SIZE = { width: 440, height: 560 };
+/** 聊天框的窗口大小可以拖角调整，记在本机；这里是默认值和下限。 */
+const CHAT_SIZE_KEY = "paw_mini_chat_size";
+const DEFAULT_CHAT_SIZE = { width: 460, height: 640 };
+const MIN_CHAT_SIZE = { width: 360, height: 460 };
+
+function loadChatSize() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CHAT_SIZE_KEY) || "null");
+    if (saved && Number.isFinite(saved.width) && Number.isFinite(saved.height)) {
+      return {
+        width: Math.max(MIN_CHAT_SIZE.width, Math.round(saved.width)),
+        height: Math.max(MIN_CHAT_SIZE.height, Math.round(saved.height)),
+      };
+    }
+  } catch {}
+  return { ...DEFAULT_CHAT_SIZE };
+}
+
+/** 当前聊天框尺寸（逻辑像素）。模块级变量，窗口缩放、贴边计算和渲染都读它。 */
+let chatSize = loadChatSize();
+
+function applyChatSize(size: { width: number; height: number }) {
+  chatSize = {
+    width: Math.max(MIN_CHAT_SIZE.width, Math.round(size.width)),
+    height: Math.max(MIN_CHAT_SIZE.height, Math.round(size.height)),
+  };
+  return chatSize;
+}
+
+function saveChatSize() {
+  try {
+    localStorage.setItem(CHAT_SIZE_KEY, JSON.stringify(chatSize));
+  } catch {}
+}
+
+type ResizeCorner = "nw" | "se";
 const SPRITE_SIZE = 128;
 const EDGE_PADDING = 14;
 const Pikachu3D = lazy(() => import("./Pikachu3D").then((module) => ({ default: module.Pikachu3D })));
@@ -236,7 +272,7 @@ async function showMainWindow(view: "chat" | "settings") {
 
 async function resizePetWindow(expanded: boolean) {
   try {
-    const size = expanded ? CHAT_SIZE : PET_SIZE;
+    const size = expanded ? chatSize : PET_SIZE;
     await getCurrentWindow().setSize(new LogicalSize(size.width, size.height));
   } catch {
     // Browser dev fallback.
@@ -249,6 +285,7 @@ export function Pet() {
   const [facing, setFacing] = useState<Facing>("right");
   const [showMenu, setShowMenu] = useState(false);
   const [showMiniChat, setShowMiniChat] = useState(false);
+  const [chatSizeState, setChatSizeState] = useState(chatSize);
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [bubbleMessage, setBubbleMessage] = useState<string | null>(null);
@@ -597,7 +634,15 @@ export function Pet() {
       try {
         const appWindow = getCurrentWindow();
         const [work, pos] = await Promise.all([getActiveWorkArea(), appWindow.outerPosition()]);
-        const safe = clampToWorkArea(pos, work, CHAT_SIZE);
+        // 屏幕放不下就先缩小，再挪回屏幕内
+        const scale = scaleFactor();
+        const maxW = Math.floor(work.size.width / scale) - EDGE_PADDING * 2;
+        const maxH = Math.floor(work.size.height / scale) - EDGE_PADDING * 2;
+        if (chatSize.width > maxW || chatSize.height > maxH) {
+          setChatSizeState(applyChatSize({ width: Math.min(chatSize.width, maxW), height: Math.min(chatSize.height, maxH) }));
+          await appWindow.setSize(new LogicalSize(chatSize.width, chatSize.height));
+        }
+        const safe = clampToWorkArea(pos, work, chatSize);
         if (safe.x !== pos.x || safe.y !== pos.y) {
           await appWindow.setPosition(new PhysicalPosition(safe.x, safe.y));
         }
@@ -613,6 +658,145 @@ export function Pet() {
     resizePetWindow(false);
     resetToDefaultState();
   }, [pauseMotion, resetToDefaultState]);
+
+  // ── 拖角调整聊天框大小 ──
+  // 宠物窗口本身不可缩放（透明无边框），这里自己算：按住角上的把手拖动，按鼠标位移改窗口大小；
+  // 拖左上角时窗口右下角不动（同时挪位置）。指针捕获保证鼠标拖出窗口外也能继续。
+  const resizeRef = useRef<{
+    corner: ResizeCorner;
+    startX: number;
+    startY: number;
+    startSize: { width: number; height: number };
+    startPos: { x: number; y: number } | null;
+    work: WorkArea | null;
+    target: { width: number; height: number } | null;
+    busy: boolean;
+  } | null>(null);
+  const [resizing, setResizing] = useState(false);
+
+  const applyResize = useCallback(async () => {
+    const state = resizeRef.current;
+    if (!state || state.busy || !state.target) return;
+    state.busy = true;
+    const target = state.target;
+    state.target = null;
+    try {
+      const appWindow = getCurrentWindow();
+      const size = applyChatSize(target);
+      if (state.corner === "nw" && state.startPos) {
+        const scale = scaleFactor();
+        await appWindow.setPosition(
+          new PhysicalPosition(
+            Math.round(state.startPos.x + (state.startSize.width - size.width) * scale),
+            Math.round(state.startPos.y + (state.startSize.height - size.height) * scale)
+          )
+        );
+      }
+      await appWindow.setSize(new LogicalSize(size.width, size.height));
+      setChatSizeState(size);
+    } catch {
+      // Browser dev fallback.
+    } finally {
+      state.busy = false;
+      if (state.target) requestAnimationFrame(() => applyResize());
+    }
+  }, []);
+
+  const startResize = useCallback(
+    (corner: ResizeCorner) => (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      pauseMotion(5000);
+      const state = {
+        corner,
+        startX: event.screenX,
+        startY: event.screenY,
+        startSize: { ...chatSize },
+        startPos: null as { x: number; y: number } | null,
+        work: null as WorkArea | null,
+        target: null,
+        busy: false,
+      };
+      resizeRef.current = state;
+      setResizing(true);
+      Promise.all([getCurrentWindow().outerPosition(), getActiveWorkArea()])
+        .then(([pos, work]) => {
+          state.startPos = { x: pos.x, y: pos.y };
+          state.work = work;
+        })
+        .catch(() => {});
+    },
+    [pauseMotion]
+  );
+
+  const moveResize = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const state = resizeRef.current;
+      if (!state) return;
+      pauseMotion(1500);
+      const dx = event.screenX - state.startX;
+      const dy = event.screenY - state.startY;
+      let width = state.corner === "se" ? state.startSize.width + dx : state.startSize.width - dx;
+      let height = state.corner === "se" ? state.startSize.height + dy : state.startSize.height - dy;
+      // 不超出屏幕工作区
+      if (state.work && state.startPos) {
+        const scale = scaleFactor();
+        const pad = EDGE_PADDING;
+        const left = state.work.position.x / scale;
+        const top = state.work.position.y / scale;
+        const right = (state.work.position.x + state.work.size.width) / scale;
+        const bottom = (state.work.position.y + state.work.size.height) / scale;
+        const winLeft = state.startPos.x / scale;
+        const winTop = state.startPos.y / scale;
+        if (state.corner === "se") {
+          width = Math.min(width, right - pad - winLeft);
+          height = Math.min(height, bottom - pad - winTop);
+        } else {
+          width = Math.min(width, winLeft + state.startSize.width - left - pad);
+          height = Math.min(height, winTop + state.startSize.height - top - pad);
+        }
+      }
+      state.target = {
+        width: Math.max(MIN_CHAT_SIZE.width, width),
+        height: Math.max(MIN_CHAT_SIZE.height, height),
+      };
+      requestAnimationFrame(() => applyResize());
+    },
+    [applyResize, pauseMotion]
+  );
+
+  const endResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!resizeRef.current) return;
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {}
+    const finish = () => {
+      if (resizeRef.current?.busy || resizeRef.current?.target) {
+        window.setTimeout(finish, 30);
+        return;
+      }
+      resizeRef.current = null;
+      setResizing(false);
+      saveChatSize();
+    };
+    finish();
+  }, []);
+
+  /** 双击把手：恢复默认大小。 */
+  const resetChatSize = useCallback(async () => {
+    applyChatSize(DEFAULT_CHAT_SIZE);
+    saveChatSize();
+    setChatSizeState(chatSize);
+    await resizePetWindow(true);
+    try {
+      const appWindow = getCurrentWindow();
+      const [work, pos] = await Promise.all([getActiveWorkArea(), appWindow.outerPosition()]);
+      const safe = clampToWorkArea(pos, work, chatSize);
+      if (safe.x !== pos.x || safe.y !== pos.y) await appWindow.setPosition(new PhysicalPosition(safe.x, safe.y));
+    } catch {}
+  }, []);
 
   /** 以用户身份把一段指令交给桌宠执行（主动提议被接受、自动任务到点）。 */
   const runPrompt = useCallback(
@@ -708,6 +892,76 @@ export function Pet() {
     setEmotion("thinking");
     await sendMessage(text);
   }, [addMessage, isStreaming, markHumanTouch, miniInput, pauseMotion, recordTyping, sendMessage, setEmotion]);
+
+  // 全局快捷键：shortcut.ts 已经把桌宠窗口显示并聚焦，这里负责打开聊天框 / 发消息 / 停止
+  useEffect(() => {
+    const focusInput = () =>
+      window.setTimeout(() => document.querySelector<HTMLInputElement>(".mini-chat-input")?.focus(), 120);
+
+    const ask = async (text: string) => {
+      openMiniChat();
+      focusInput();
+      if (useAgentStore.getState().isStreaming) {
+        useAgentStore.getState().interject(text);
+        return;
+      }
+      addMessage({ role: "user", content: text });
+      setPetState("thinking");
+      setEmotion("thinking");
+      await sendMessage(text);
+    };
+
+    const onHotkey = async (event: Event) => {
+      const action = (event as CustomEvent<string>).detail;
+      markHumanTouch();
+      if (action === "stop") {
+        if (useAgentStore.getState().isStreaming) {
+          useAgentStore.getState().stopGeneration();
+          speak("好，停下了。", 3000, "idle");
+        }
+        return;
+      }
+      if (action === "chat") {
+        openMiniChat();
+        focusInput();
+        return;
+      }
+      if (action === "screen") {
+        await ask("看一下我现在的屏幕：说说上面是什么，有没有需要我注意或者你能帮忙的地方。");
+        return;
+      }
+      if (action === "clipboard") {
+        let clip: { kind: string; text: string; files: string[] } = { kind: "empty", text: "", files: [] };
+        try {
+          clip = await invoke("clipboard_read");
+        } catch {
+          try {
+            clip = { kind: "text", text: await navigator.clipboard.readText(), files: [] };
+          } catch {}
+        }
+        if (clip.kind === "text" && clip.text.trim()) {
+          const text = clip.text.trim();
+          const fence = text.includes("```") ? "~~~" : "```";
+          await ask(
+            `帮我处理一下刚复制的内容：报错就分析原因和解决办法，外文就翻译成中文，长文就总结要点，其他情况判断我最可能想做什么。\n\n${fence}\n${text}\n${fence}`
+          );
+        } else if (clip.kind === "files" && clip.files.length) {
+          await ask(`我刚复制了这些文件，帮我看看是什么、能怎么处理：\n${clip.files.map((file) => `- ${file}`).join("\n")}`);
+        } else {
+          speak(
+            clip.kind === "private"
+              ? "这段内容被标记为私密（比如密码），我就不看啦。"
+              : clip.kind === "image"
+                ? "剪贴板里是图片，可以截屏或发图片给我。"
+                : "剪贴板是空的，先复制一段文字再按我～"
+          );
+        }
+      }
+    };
+
+    window.addEventListener(HOTKEY_EVENT, onHotkey);
+    return () => window.removeEventListener(HOTKEY_EVENT, onHotkey);
+  }, [addMessage, markHumanTouch, openMiniChat, sendMessage, setEmotion, speak]);
 
   useEffect(() => {
     resizePetWindow(showMiniChat);
@@ -1022,9 +1276,9 @@ export function Pet() {
     pauseMotion(700);
   }, [pauseMotion]);
 
-  const menuLeft = Math.max(8, Math.min(menuPos.x, (showMiniChat ? CHAT_SIZE.width : PET_SIZE.width) - 164));
-  const menuTop = Math.max(8, Math.min(menuPos.y, (showMiniChat ? CHAT_SIZE.height : PET_SIZE.height) - 286));
-  const recentMessages = messages.slice(-8);
+  const menuLeft = Math.max(8, Math.min(menuPos.x, (showMiniChat ? chatSizeState.width : PET_SIZE.width) - 164));
+  const menuTop = Math.max(8, Math.min(menuPos.y, (showMiniChat ? chatSizeState.height : PET_SIZE.height) - 286));
+  const recentMessages = messages.slice(-30);
 
   return (
     <div className={`pet-window ${themeClass} relative h-screen w-screen select-none overflow-hidden`} onContextMenu={handleContextMenu}>
@@ -1107,14 +1361,46 @@ export function Pet() {
       )}
 
       {showMiniChat && (
-        <div className="mini-chat-window absolute left-4 right-4 top-4 z-30 rounded-2xl border border-line bg-surface/95 text-fg p-3 shadow-2xl pointer-events-auto">
-          <div className="mb-2 flex items-center justify-between">
+        <div
+          className={`mini-chat-window absolute left-3 right-3 top-3 z-30 flex flex-col rounded-2xl border border-line bg-surface/95 text-fg p-3 shadow-2xl pointer-events-auto ${
+            resizing ? "select-none" : ""
+          }`}
+          style={{ bottom: (petSize || SPRITE_SIZE) + 20 }}
+        >
+          {(["nw", "se"] as const).map((corner) => (
+            <div
+              key={corner}
+              data-resize={corner}
+              onPointerDown={startResize(corner)}
+              onPointerMove={moveResize}
+              onPointerUp={endResize}
+              onPointerCancel={endResize}
+              onDoubleClick={resetChatSize}
+              title="拖动调整聊天框大小，双击恢复默认"
+              className={`group absolute z-40 flex h-5 w-5 items-center justify-center ${
+                corner === "nw" ? "-left-1 -top-1 cursor-nwse-resize" : "-bottom-1 -right-1 cursor-nwse-resize"
+              }`}
+            >
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 10 10"
+                className={`text-fg-muted opacity-50 transition group-hover:text-primary group-hover:opacity-100 ${
+                  corner === "nw" ? "rotate-180" : ""
+                } ${resizing && resizeRef.current?.corner === corner ? "text-primary opacity-100" : ""}`}
+                aria-hidden="true"
+              >
+                <path d="M9 1 L1 9 M9 5 L5 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              </svg>
+            </div>
+          ))}
+          <div className="mb-2 flex shrink-0 items-center justify-between">
             <div className="text-sm font-semibold text-fg">和{petName}聊天</div>
             <button className="text-xs text-fg-muted hover:text-fg" onClick={closeMiniChat}>
               收起
             </button>
           </div>
-          <div ref={miniChatListRef} className="mini-chat-list h-60 space-y-2 overflow-y-auto rounded-xl bg-app p-2">
+          <div ref={miniChatListRef} className="mini-chat-list min-h-0 flex-1 space-y-2 overflow-y-auto rounded-xl bg-app p-2">
             {recentMessages.length === 0 && <div className="text-sm text-fg-muted">直接输入就能聊天。</div>}
             {recentMessages.map((message) => (
               <div
@@ -1138,7 +1424,7 @@ export function Pet() {
             ))}
             {isStreaming && <MiniStreamingReply text={streamText} runs={currentToolRuns} />}
           </div>
-          <div className="mt-2 flex gap-2">
+          <div className="mt-2 flex shrink-0 gap-2">
             <input
               className="mini-chat-input min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 py-2 text-sm text-fg outline-none focus:border-primary"
               value={miniInput}
