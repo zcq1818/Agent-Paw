@@ -7,6 +7,7 @@ mod ai_apps;
 mod claude_code;
 mod control;
 mod mcp_client;
+mod oauth_callback;
 mod ocr;
 mod timeline;
 mod tray;
@@ -442,7 +443,10 @@ pub fn run() {
             ocr::ocr_window,
             mcp_client::mcp_stdio_request,
             mcp_client::mcp_stdio_stop,
-            mcp_client::mcp_stdio_running
+            mcp_client::mcp_stdio_running,
+            oauth_callback::oauth_listen,
+            oauth_callback::oauth_wait,
+            oauth_callback::oauth_cancel
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

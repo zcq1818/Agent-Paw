@@ -13,6 +13,7 @@ import {
   Loader2,
   Menu,
   Palette,
+  Plug,
   PlugZap,
   Plus,
   Sparkles,
@@ -71,11 +72,12 @@ interface SettingsProps {
   onOpenSidebar?: () => void;
 }
 
-type SettingsSection = "model" | "features" | "pet" | "appearance" | "shortcuts";
+type SettingsSection = "model" | "features" | "mcp" | "pet" | "appearance" | "shortcuts";
 
 const SECTIONS: Array<{ id: SettingsSection; label: string; icon: React.ReactNode }> = [
   { id: "model", label: "模型", icon: <Cpu size={15} /> },
   { id: "features", label: "AI 能力", icon: <Sparkles size={15} /> },
+  { id: "mcp", label: "MCP 服务", icon: <Plug size={15} /> },
   { id: "pet", label: "桌宠", icon: <Bot size={15} /> },
   { id: "appearance", label: "外观", icon: <Palette size={15} /> },
   { id: "shortcuts", label: "快捷键", icon: <Keyboard size={15} /> },
@@ -717,8 +719,6 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
                 <AlwaysAllowList />
               </Card>
 
-              <McpServersCard />
-
               <Card
                 title="本地活动观察"
                 description="让桌宠记住你在电脑上做过什么，之后能回答“我昨天下午在干嘛”、帮你写日报、找回打开过的文件。不截图、不记录按键、不上传。"
@@ -905,6 +905,7 @@ export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
             </Card>
           )}
 
+          {activeSection === "mcp" && <McpServersCard />}
           {activeSection === "shortcuts" && <HotkeySettingsCard />}
         </div>
       </div>
