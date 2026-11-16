@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
+import { register, unregister, unregisterAll as unregisterAllShortcuts } from "@tauri-apps/plugin-global-shortcut";
 import { create } from "zustand";
 
 /**
@@ -13,9 +13,15 @@ import { create } from "zustand";
  * 录制新热键时设置页会发 hotkeys-pause，暂时注销全部热键，免得按下旧组合时触发动作。
  */
 
-export type HotkeyAction = "workbench" | "chat" | "clipboard" | "screen" | "pet" | "stop";
+export type HotkeyAction = "launcher" | "workbench" | "chat" | "clipboard" | "screen" | "pet" | "stop";
 
 export const HOTKEY_ACTIONS: Array<{ id: HotkeyAction; label: string; description: string; suggestion: string }> = [
+  {
+    id: "launcher",
+    label: "快捷打开软件",
+    description: "呼出搜索框，输入软件名、拼音或首字母，回车打开。",
+    suggestion: "Alt+Space",
+  },
   { id: "chat", label: "和桌宠聊天", description: "弹出桌宠的聊天框，光标直接在输入框里。", suggestion: "Alt+Shift+C" },
   {
     id: "clipboard",
@@ -35,6 +41,7 @@ export const HOTKEY_STATUS_KEY = "paw_hotkey_status";
 const LEGACY_CHAT_HOTKEY_KEY = "paw_chat_hotkey";
 
 export const DEFAULT_HOTKEYS: Record<HotkeyAction, string> = {
+  launcher: "Alt+Space",
   workbench: "CommandOrControl+Shift+P",
   chat: "Alt+Shift+C",
   clipboard: "Alt+Shift+V",
@@ -118,6 +125,10 @@ async function runAction(action: HotkeyAction) {
     await invoke("toggle_main_window");
     return;
   }
+  if (action === "launcher") {
+    await invoke("toggle_launcher");
+    return;
+  }
   if (action === "pet") {
     const pet = getCurrentWindow();
     if (await pet.isVisible()) await pet.hide();
@@ -131,7 +142,7 @@ async function runAction(action: HotkeyAction) {
 
 function describeError(error: unknown) {
   const text = String(error instanceof Error ? error.message : error);
-  if (/already|registered|in use|HotKey/i.test(text)) return "被别的软件占用了，换一个组合";
+  if (/already|registered|in use|HotKey/i.test(text)) return "被别的软件占用了（比如 uTools）：退出那个软件后会自动生效，或者换一个组合";
   if (/parse|invalid|unknown/i.test(text)) return "这个组合无法识别";
   return text.slice(0, 80);
 }
@@ -158,8 +169,28 @@ export function useChatHotkeyRegistration(enabled: boolean) {
       await Promise.all(current.map((shortcut) => unregister(shortcut).catch(() => {})));
     };
 
+    let lastStatus: Partial<Record<HotkeyAction, string>> = {};
+
+    const registerOne = async (id: HotkeyAction, shortcut: string) => {
+      await register(shortcut, (event) => {
+        // 按下和松开都会回调，只在按下时执行，否则会开了又关
+        if (event.state !== "Pressed") return;
+        runAction(id).catch((error) => console.warn("hotkey action failed", id, error));
+      });
+      registered.push(shortcut);
+    };
+
+    const publish = (status: Partial<Record<HotkeyAction, string>>) => {
+      lastStatus = status;
+      localStorage.setItem(HOTKEY_STATUS_KEY, JSON.stringify(status));
+      useShortcutStore.setState({ status });
+      emit("hotkeys-status", status).catch(() => {});
+    };
+
     const registerAll = async () => {
       await unregisterAll();
+      // 只有宠物窗口注册热键：窗口刷新后上一次注册的还挂在应用里，会被误报“被占用”，先全部清掉
+      await unregisterAllShortcuts().catch(() => {});
       const status: Partial<Record<HotkeyAction, string>> = {};
       const used = new Map<string, HotkeyAction>();
       for (const { id } of HOTKEY_ACTIONS) {
@@ -171,22 +202,35 @@ export function useChatHotkeyRegistration(enabled: boolean) {
         }
         used.set(shortcut, id);
         try {
-          await register(shortcut, (event) => {
-            // 按下和松开都会回调，只在按下时执行，否则会开了又关
-            if (event.state !== "Pressed") return;
-            runAction(id).catch((error) => console.warn("hotkey action failed", id, error));
-          });
-          registered.push(shortcut);
+          await registerOne(id, shortcut);
           status[id] = "ok";
         } catch (error) {
           status[id] = describeError(error);
         }
         if (disposed) break;
       }
-      localStorage.setItem(HOTKEY_STATUS_KEY, JSON.stringify(status));
-      useShortcutStore.setState({ status });
-      emit("hotkeys-status", status).catch(() => {});
+      publish(status);
     };
+
+    /** 被别的软件占用的热键（比如还没退出的 uTools 占着 Alt+Space）：每 30 秒重试，对方一退出就生效。 */
+    const retryTaken = async () => {
+      if (paused || disposed) return;
+      const taken = HOTKEY_ACTIONS.filter(({ id }) => lastStatus[id] && lastStatus[id] !== "ok" && lastStatus[id] !== "和另一个快捷键重复了");
+      if (!taken.length) return;
+      const status = { ...lastStatus };
+      let changed = false;
+      for (const { id } of taken) {
+        const shortcut = normalizeHotkey(hotkeys[id] || "");
+        if (!shortcut) continue;
+        try {
+          await registerOne(id, shortcut);
+          status[id] = "ok";
+          changed = true;
+        } catch {}
+      }
+      if (changed) publish(status);
+    };
+    const retryTimer = window.setInterval(() => queue(retryTaken), 30_000);
 
     queue(registerAll);
 
@@ -202,6 +246,7 @@ export function useChatHotkeyRegistration(enabled: boolean) {
 
     return () => {
       disposed = true;
+      window.clearInterval(retryTimer);
       unlistenPause?.();
       queue(unregisterAll);
     };

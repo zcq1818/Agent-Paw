@@ -6,6 +6,7 @@ use serde::Serialize;
 mod ai_apps;
 mod claude_code;
 mod control;
+mod launcher;
 mod mcp_client;
 mod oauth_callback;
 mod skills;
@@ -452,7 +453,11 @@ pub fn run() {
             skills::skills_scan,
             skills::skill_read_file,
             skills::skill_save,
-            skills::skill_delete
+            skills::skill_delete,
+            launcher::launcher_apps,
+            launcher::launcher_cache_age,
+            launcher::launcher_open,
+            launcher::toggle_launcher
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

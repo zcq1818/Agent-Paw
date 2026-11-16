@@ -960,7 +960,28 @@ export function Pet() {
     };
 
     window.addEventListener(HOTKEY_EVENT, onHotkey);
-    return () => window.removeEventListener(HOTKEY_EVENT, onHotkey);
+
+    // 启动器里搜不到软件、选了“问桌宠”：打开聊天框把这句话发出去
+    let disposed = false;
+    let unlistenAsk: (() => void) | undefined;
+    listen<{ text?: string }>("launcher-ask", async (event) => {
+      const text = event.payload?.text?.trim();
+      if (!text) return;
+      try {
+        const appWindow = getCurrentWindow();
+        if (!(await appWindow.isVisible())) await appWindow.show();
+        await appWindow.setFocus();
+      } catch {}
+      await ask(text);
+    })
+      .then((fn) => (disposed ? fn() : (unlistenAsk = fn)))
+      .catch(() => {});
+
+    return () => {
+      disposed = true;
+      unlistenAsk?.();
+      window.removeEventListener(HOTKEY_EVENT, onHotkey);
+    };
   }, [addMessage, markHumanTouch, openMiniChat, sendMessage, setEmotion, speak]);
 
   useEffect(() => {

@@ -39,6 +39,20 @@
         "transparent": false,
         "visible": false,
         "center": true
+      },
+      {
+        "label": "launcher",
+        "title": "Paw 启动器",
+        "width": 680,
+        "height": 72,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "visible": false,
+        "center": true
       }
     ],
     "security": {

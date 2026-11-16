@@ -66,7 +66,7 @@ fn trae_launcher(location: &str, icon: &str) -> Option<PathBuf> {
 
 /// 启动其它软件时脱离桌宠的进程树：桌宠重启 / 退出时不会把 Trae、WorkBuddy 一起带走。
 /// 所在的作业对象不允许脱离时，退回普通启动。
-fn spawn_detached(mut cmd: std::process::Command, hidden: bool) -> std::io::Result<()> {
+pub(crate) fn spawn_detached(mut cmd: std::process::Command, hidden: bool) -> std::io::Result<()> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
