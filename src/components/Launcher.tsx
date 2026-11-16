@@ -1,8 +1,26 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import { Globe, MessageCircle, PawPrint, RefreshCw, Tag } from "lucide-react";
+import { getAllWindows, getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import {
+  Activity,
+  Brain,
+  Eye,
+  Globe,
+  Keyboard,
+  ListTodo,
+  MessageCircle,
+  MessagesSquare,
+  Palette,
+  PawPrint,
+  Plug,
+  RefreshCw,
+  Settings as SettingsIcon,
+  Sparkles,
+  Tag,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
 import { useThemeClass } from "../store/theme";
 import { indexApp, isUsefulApp, matchApp, type IndexedApp, type LauncherApp } from "../agent/launcherSearch";
 
@@ -11,7 +29,54 @@ import { indexApp, isUsefulApp, matchApp, type IndexedApp, type LauncherApp } fr
  * 选中软件按 Tab 可以给它设自己的简称；搜不到软件时可以打开网址或交给桌宠。
  */
 
+/** 桌宠自己的功能入口：点爪印图标列出全部，搜索时也能搜到。 */
+interface PawAction {
+  id: string;
+  label: string;
+  description: string;
+  icon: LucideIcon;
+  /** 额外能搜到它的词（英文 / 常用说法） */
+  keywords: string[];
+  view?: string;
+  section?: string;
+  action?: "toggle-pet" | "refresh";
+}
+
+const PAW_ACTIONS: PawAction[] = [
+  { id: "chat", label: "和桌宠聊天", description: "打开工作台的聊天", icon: MessageCircle, keywords: ["chat", "gzt", "工作台", "对话"], view: "chat" },
+  { id: "settings", label: "设置", description: "模型、AI 能力、桌宠、外观", icon: SettingsIcon, keywords: ["settings", "pz", "配置"], view: "settings", section: "model" },
+  { id: "model", label: "模型设置", description: "换模型、填 API Key", icon: SettingsIcon, keywords: ["model", "ai", "apikey"], view: "settings", section: "model" },
+  { id: "mcp", label: "MCP 服务", description: "Jira、Notion、Slack 等外部工具", icon: Plug, keywords: ["mcp", "jira", "slack", "notion", "连接"], view: "mcp" },
+  { id: "hotkeys", label: "快捷键", description: "改呼出启动器、聊天的快捷键", icon: Keyboard, keywords: ["hotkey", "shortcut", "rjj"], view: "settings", section: "shortcuts" },
+  { id: "skills", label: "技能", description: "加载、编写技能", icon: Sparkles, keywords: ["skill", "skills"], view: "skills" },
+  { id: "team", label: "团队", description: "团队成员和各自的模型", icon: Users, keywords: ["team", "bot", "成员"], view: "team" },
+  { id: "rooms", label: "团队房间", description: "多个成员一起讨论", icon: MessagesSquare, keywords: ["room"], view: "rooms" },
+  { id: "memory", label: "记忆", description: "桌宠记住的关于你的事", icon: Brain, keywords: ["memory"], view: "memory" },
+  { id: "tasks", label: "任务与日程", description: "待办、日程、提醒", icon: ListTodo, keywords: ["todo", "task", "待办", "日程"], view: "tasks" },
+  { id: "activity", label: "电脑活动", description: "今天都在干什么", icon: Activity, keywords: ["activity", "日报"], view: "activity" },
+  { id: "appearance", label: "外观与主题", description: "浅色 / 深色", icon: Palette, keywords: ["theme", "dark", "主题"], view: "settings", section: "appearance" },
+  { id: "pet", label: "桌宠形象", description: "换形象、名字、大小", icon: PawPrint, keywords: ["pet", "形象", "名字"], view: "settings", section: "pet" },
+  { id: "toggle-pet", label: "显示 / 隐藏桌宠", description: "把桌宠藏起来或叫出来", icon: Eye, keywords: ["hide", "show", "隐藏", "显示"], action: "toggle-pet" },
+  { id: "refresh", label: "刷新软件列表", description: "装了新软件后用", icon: RefreshCw, keywords: ["refresh", "sx"], action: "refresh" },
+];
+
+const PAW_INDEX = PAW_ACTIONS.map((action) => ({
+  action,
+  indexed: indexApp({ name: action.label, id: `paw:${action.id}`, path: "", icon: "" }, action.keywords),
+}));
+
+async function showWorkbench(view: string, section?: string) {
+  await emit("open-view", { view, section });
+  const main = (await getAllWindows()).find((w) => w.label === "main");
+  if (main) {
+    await main.show();
+    await main.unminimize().catch(() => {});
+    await main.setFocus();
+  }
+}
+
 type Row =
+  | { kind: "paw"; action: PawAction; highlight: Set<number> }
   | { kind: "app"; app: IndexedApp; score: number; highlight: Set<number>; via?: string }
   | { kind: "url"; url: string }
   | { kind: "ask"; text: string };
@@ -26,12 +91,6 @@ const LABEL_H = 26;
 const FOOTER_H = 40;
 const MAX_APPS = 7;
 const REFRESH_AFTER_MS = 6 * 60 * 60 * 1000;
-const EXAMPLES: Array<[string, string]> = [
-  ["wx", "微信"],
-  ["vsc", "VS Code"],
-  ["jsb", "记事本"],
-  ["chrome", "浏览器"],
-];
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -136,6 +195,8 @@ export function Launcher() {
   const [notice, setNotice] = useState("");
   const [aliasTarget, setAliasTarget] = useState<IndexedApp | null>(null);
   const [aliasInput, setAliasInput] = useState("");
+  /** 点了爪印图标：列出桌宠的全部功能 */
+  const [menuOpen, setMenuOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const [usage, setUsage] = useState(() => readJson<Record<string, { count: number; last: number }>>(USAGE_KEY, {}));
 
@@ -184,6 +245,7 @@ export function Launcher() {
         setSelected(0);
         setNotice("");
         setAliasTarget(null);
+        setMenuOpen(false);
         focusInput();
       })
     );
@@ -209,6 +271,10 @@ export function Launcher() {
 
   const { rows, sections } = useMemo(() => {
     const q = query.trim();
+    if (menuOpen && !q) {
+      const all = PAW_ACTIONS.map((action) => ({ kind: "paw" as const, action, highlight: new Set<number>() }));
+      return { rows: all as Row[], sections: [{ at: 0, label: "桌宠" }] };
+    }
     if (!q) {
       const recent = apps
         .filter((app) => usage[app.id])
@@ -227,22 +293,37 @@ export function Launcher() {
     // 已经有很准的结果时，跳字匹配这类勉强沾边的就不显示了
     const top = matchedAll[0]?.score || 0;
     const matched: Row[] = matchedAll.filter((row) => top < 80 || row.score >= 56).slice(0, MAX_APPS);
+    // 桌宠自己的功能：搜“设置”“mcp”“快捷键”也能直接跳过去
+    const paw: Row[] = PAW_INDEX.map(({ action, indexed }) => ({ action, m: matchApp(indexed, q) }))
+      .filter((item) => item.m && item.m.score >= (menuOpen ? 1 : 60))
+      .sort((a, b) => b.m!.score - a.m!.score)
+      .slice(0, menuOpen ? PAW_ACTIONS.length : 3)
+      .map((item) => ({ kind: "paw" as const, action: item.action, highlight: item.m!.via ? new Set<number>() : item.m!.highlight }));
     const extra: Row[] = [];
     if (looksLikeUrl(q)) extra.push({ kind: "url", url: /^https?:\/\//i.test(q) ? q : `https://${q}` });
     extra.push({ kind: "ask", text: q });
+    if (menuOpen) return { rows: paw, sections: paw.length ? [{ at: 0, label: "桌宠" }] : [] };
     const sections = [];
     if (matched.length) sections.push({ at: 0, label: "软件" });
-    sections.push({ at: matched.length, label: "更多" });
-    return { rows: [...matched, ...extra], sections };
-  }, [apps, query, usage, boost]);
+    if (paw.length) sections.push({ at: matched.length, label: "桌宠" });
+    sections.push({ at: matched.length + paw.length, label: "更多" });
+    return { rows: [...matched, ...paw, ...extra], sections };
+  }, [apps, query, usage, boost, menuOpen]);
 
   useEffect(() => {
     if (selected >= rows.length) setSelected(Math.max(0, rows.length - 1));
   }, [rows.length, selected]);
 
-  const showExamples = !query.trim() && rows.length === 0 && !aliasTarget;
-  const listHeight = aliasTarget ? 0 : rows.length * ROW_H + sections.length * LABEL_H + (rows.length ? 12 : 0);
-  const height = PAD * 2 + SEARCH_H + listHeight + (showExamples ? 64 : 0) + FOOTER_H;
+  // 点爪印、还没输入时：桌宠功能用宫格显示，一屏看全
+  const grid = menuOpen && !query.trim() && !aliasTarget;
+  const GRID_COLS = 4;
+  const GRID_ROW_H = 86;
+  const listHeight = aliasTarget
+    ? 0
+    : grid
+      ? Math.ceil(rows.length / GRID_COLS) * GRID_ROW_H + LABEL_H + 16
+      : rows.length * ROW_H + sections.length * LABEL_H + (rows.length ? 12 : 0);
+  const height = PAD * 2 + SEARCH_H + listHeight + FOOTER_H;
   useEffect(() => {
     getCurrentWindow()
       .setSize(new LogicalSize(WIDTH, height))
@@ -252,7 +333,21 @@ export function Launcher() {
   const run = async (row: Row | undefined) => {
     if (!row) return;
     try {
-      if (row.kind === "app") {
+      if (row.kind === "paw") {
+        if (row.action.action === "refresh") {
+          await load(true);
+          return;
+        }
+        if (row.action.action === "toggle-pet") {
+          const pet = (await getAllWindows()).find((w) => w.label === "pet");
+          if (pet) {
+            if (await pet.isVisible()) await pet.hide();
+            else await pet.show();
+          }
+        } else if (row.action.view) {
+          await showWorkbench(row.action.view, row.action.section);
+        }
+      } else if (row.kind === "app") {
         recordUsage(row.app.id);
         await invoke("launcher_open", { id: row.app.id });
       } else if (row.kind === "url") {
@@ -307,13 +402,20 @@ export function Launcher() {
     if (event.key === "Escape") {
       event.preventDefault();
       if (query) setQuery("");
+      else if (menuOpen) setMenuOpen(false);
       else hide();
+    } else if (grid && (event.key === "ArrowRight" || event.key === "ArrowLeft")) {
+      event.preventDefault();
+      const step = event.key === "ArrowRight" ? 1 : -1;
+      setSelected((v) => (v + step + rows.length) % rows.length);
     } else if (event.key === "ArrowDown") {
       event.preventDefault();
-      setSelected((v) => (rows.length ? (v + 1) % rows.length : 0));
+      const step = grid ? GRID_COLS : 1;
+      setSelected((v) => (rows.length ? Math.min(rows.length - 1, v + step) % rows.length : 0));
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      setSelected((v) => (rows.length ? (v - 1 + rows.length) % rows.length : 0));
+      const step = grid ? GRID_COLS : 1;
+      setSelected((v) => (rows.length ? (v - step + rows.length) % rows.length : 0));
     } else if (event.key === "Enter") {
       event.preventDefault();
       void run(rows[selected]);
@@ -333,9 +435,27 @@ export function Launcher() {
       <div className="flex h-full flex-col overflow-hidden rounded-[20px] border border-line/80 bg-surface shadow-[0_18px_50px_-12px_rgba(4,30,66,0.38)]">
         {/* 搜索栏 */}
         <div className="flex shrink-0 items-center gap-3 px-4" style={{ height: SEARCH_H }}>
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            {aliasTarget ? <AppIcon app={aliasTarget} size={26} /> : <PawPrint size={20} strokeWidth={2.2} />}
-          </span>
+          {aliasTarget ? (
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+              <AppIcon app={aliasTarget} size={26} />
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen((open) => !open);
+                setQuery("");
+                setSelected(0);
+                focusInput();
+              }}
+              title="桌宠的全部功能：聊天、设置、快捷键、MCP、技能……"
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition ${
+                menuOpen ? "bg-primary text-primary-fg shadow-sm" : "bg-primary/10 text-primary hover:bg-primary/20"
+              }`}
+            >
+              <PawPrint size={20} strokeWidth={2.2} />
+            </button>
+          )}
           <input
             ref={inputRef}
             autoFocus
@@ -352,13 +472,19 @@ export function Launcher() {
             placeholder={
               aliasTarget
                 ? `给「${aliasTarget.name}」设简称，多个用空格隔开，如 vx wc`
-                : "打开软件：输入名字、拼音、首字母或简称"
+                : menuOpen
+                  ? "桌宠的功能：设置、快捷键、MCP、技能……"
+                  : "打开软件：输入名字、拼音、首字母或简称"
             }
             className="chat-composer-input min-w-0 flex-1 border-0 bg-transparent text-[19px] font-medium text-fg outline-none placeholder:font-normal placeholder:text-fg-muted/80"
             spellCheck={false}
           />
           {loading ? (
             <RefreshCw size={16} className="shrink-0 animate-spin text-fg-muted" />
+          ) : grid ? (
+            <span className="shrink-0 text-[11px] text-fg-muted">
+              <Kbd>Esc</Kbd> 返回
+            </span>
           ) : aliasTarget ? (
             <span className="flex shrink-0 items-center gap-1 text-[11px] text-fg-muted">
               <Kbd>Enter</Kbd> 保存
@@ -370,14 +496,49 @@ export function Launcher() {
           ) : null}
         </div>
 
+        {/* 桌宠功能宫格 */}
+        {grid && (
+          <div className="border-t border-line/70 px-3 pb-2">
+            <div className="flex items-end px-2 text-[11px] font-medium tracking-wide text-fg-muted" style={{ height: LABEL_H }}>
+              桌宠
+            </div>
+            <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+              {rows.map((row, index) =>
+                row.kind === "paw" ? (
+                  <button
+                    key={row.action.id}
+                    type="button"
+                    onMouseMove={() => setSelected(index)}
+                    onClick={() => void run(row)}
+                    title={row.action.description}
+                    className={`flex flex-col items-center justify-center gap-1.5 rounded-xl px-2 transition-colors ${
+                      index === selected ? "bg-primary/[0.09] ring-1 ring-primary/40" : "hover:bg-surface-2"
+                    }`}
+                    style={{ height: GRID_ROW_H - 6 }}
+                  >
+                    <span
+                      className={`flex h-9 w-9 items-center justify-center rounded-xl ${
+                        index === selected ? "bg-primary text-primary-fg" : "bg-surface-2 text-primary"
+                      }`}
+                    >
+                      <row.action.icon size={18} />
+                    </span>
+                    <span className="w-full truncate text-center text-xs text-fg">{row.action.label}</span>
+                  </button>
+                ) : null
+              )}
+            </div>
+          </div>
+        )}
+
         {/* 结果 */}
-        {!aliasTarget && rows.length > 0 && (
+        {!grid && !aliasTarget && rows.length > 0 && (
           <div className="border-t border-line/70 px-2 py-1.5">
             {rows.map((row, index) => {
               const active = index === selected;
               const label = sectionAt.get(index);
               return (
-                <Fragment key={row.kind === "app" ? `${row.app.id}|${row.app.name}` : row.kind}>
+                <Fragment key={row.kind === "app" ? `${row.app.id}|${row.app.name}` : row.kind === "paw" ? `paw:${row.action.id}` : row.kind}>
                   {label && (
                     <div className="flex items-end px-3 text-[11px] font-medium tracking-wide text-fg-muted" style={{ height: LABEL_H }}>
                       {label}
@@ -395,6 +556,8 @@ export function Launcher() {
                     <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-surface-2">
                       {row.kind === "app" ? (
                         <AppIcon app={row.app} />
+                      ) : row.kind === "paw" ? (
+                        <row.action.icon size={18} className="text-primary" />
                       ) : row.kind === "url" ? (
                         <Globe size={18} className="text-fg-muted" />
                       ) : (
@@ -415,6 +578,13 @@ export function Launcher() {
                             ))}
                           </div>
                           <div className="truncate text-[11px] text-fg-muted">{row.via || shortPath(row.app.path)}</div>
+                        </>
+                      ) : row.kind === "paw" ? (
+                        <>
+                          <div className="truncate text-[15px] text-fg">
+                            <Highlighted text={row.action.label} marks={row.highlight} />
+                          </div>
+                          <div className="truncate text-[11px] text-fg-muted">{row.action.description}</div>
                         </>
                       ) : row.kind === "url" ? (
                         <>
@@ -458,30 +628,26 @@ export function Launcher() {
           </div>
         )}
 
-        {showExamples && (
-          <div className="flex items-center gap-2 border-t border-line/70 px-5" style={{ height: 64 }}>
-            <span className="text-xs text-fg-muted">试试</span>
-            {EXAMPLES.map(([q, label]) => (
-              <button
-                key={q}
-                type="button"
-                onClick={() => {
-                  setQuery(q);
-                  focusInput();
-                }}
-                className="rounded-lg border border-line px-2.5 py-1 text-xs text-fg hover:border-primary/60 hover:bg-primary/5"
-              >
-                <span className="font-semibold text-primary-ink">{q}</span>
-                <span className="ml-1 text-fg-muted">{label}</span>
-              </button>
-            ))}
-          </div>
-        )}
-
         {/* 底栏 */}
         <div className="mt-auto flex shrink-0 items-center gap-3 border-t border-line/70 bg-surface-2/60 px-4 text-[11px] text-fg-muted" style={{ height: FOOTER_H }}>
           {notice ? (
             <span className="min-w-0 flex-1 truncate">{notice}</span>
+          ) : grid ? (
+            <span className="flex min-w-0 flex-1 items-center gap-3">
+              <span className="flex items-center gap-1">
+                <Kbd>←</Kbd>
+                <Kbd>→</Kbd>
+                <Kbd>↑</Kbd>
+                <Kbd>↓</Kbd> 选择
+              </span>
+              <span className="flex items-center gap-1">
+                <Kbd>↵</Kbd> 打开
+              </span>
+              <span>直接打字可以搜</span>
+              <span className="flex items-center gap-1">
+                <Kbd>Esc</Kbd> 返回
+              </span>
+            </span>
           ) : aliasTarget ? (
             <span className="flex min-w-0 flex-1 items-center gap-3">
               <span className="flex items-center gap-1">

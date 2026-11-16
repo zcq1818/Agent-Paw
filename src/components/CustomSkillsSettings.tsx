@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { PageHeader } from "./ui";
 import { customSkillsStore, type CustomSkill } from "../agent/customSkills";
 import { SkillLibraryPanel } from "./SkillLibraryPanel";
 import { useThemeClass } from "../store/theme";
@@ -141,13 +142,11 @@ export function CustomSkillsSettings({ onClose }: CustomSkillsSettingsProps) {
 
   return (
     <div className={`chat-window ${themeClass} flex flex-col h-screen`}>
-      <div className="flex items-center justify-between px-4 py-3 bg-gray-800/80 backdrop-blur border-b border-gray-700">
-        <div className="flex items-center gap-3">
-          <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
-            ←
-          </button>
-          <span className="font-semibold text-white">技能</span>
-        </div>
+      <PageHeader
+        title="技能"
+        description="教桌宠一套做事方法，遇到相关请求时按它来做"
+        onBack={onClose}
+        actions={
         <div className="flex items-center gap-2">
           <label
             className="cursor-pointer rounded-lg border border-line px-3 py-1.5 text-xs text-fg transition hover:bg-surface-2"
@@ -164,14 +163,15 @@ export function CustomSkillsSettings({ onClose }: CustomSkillsSettingsProps) {
             新建简单技能
           </button>
         </div>
-      </div>
+        }
+      />
 
       <div className="flex-1 overflow-y-auto">
       <SkillLibraryPanel />
-      <div className="px-4 pt-4 text-base font-semibold text-fg">桌宠内的技能</div>
-      <p className="px-4 pb-1 text-xs text-fg-muted">用右上角“新建技能”表单建的简单技能（只有说明文字），和上面的技能一样按需使用。</p>
-      <div className="px-4 py-3 bg-gray-800/50 border-b border-gray-700">
-        <div className="flex items-center gap-4 text-sm text-gray-300">
+      <div className="page-pad pt-6 text-base font-semibold text-fg">桌宠内的技能</div>
+      <p className="page-pad pb-1 text-xs text-fg-muted">用右上角“新建技能”表单建的简单技能（只有说明文字），和上面的技能一样按需使用。</p>
+      <div className="page-pad py-2">
+        <div className="flex items-center gap-4 text-xs text-fg-muted">
           <span>总技能：{stats.total}</span>
           <span>已启用：{stats.active}</span>
           {stats.categories.filter((cat) => cat.count > 0).map((cat) => (
@@ -184,7 +184,7 @@ export function CustomSkillsSettings({ onClose }: CustomSkillsSettingsProps) {
 
       <div>
         {showAddForm && (
-          <div className="p-4 bg-gray-800/50 border-b border-gray-700">
+          <div className="page-pad py-4">
             <h3 className="text-lg font-semibold text-white mb-4">
               {editingSkill ? "编辑技能" : "新建技能"}
             </h3>
@@ -266,7 +266,7 @@ export function CustomSkillsSettings({ onClose }: CustomSkillsSettingsProps) {
           </div>
         )}
 
-        <div className="p-4 space-y-3">
+        <div className="page-pad space-y-3 pb-6 pt-2">
           {skills.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-gray-400">
               <div className="text-5xl mb-4">⚡</div>
@@ -323,22 +323,22 @@ function SkillCard({
   const category = CATEGORIES.find((item) => item.name === skill.category) || CATEGORIES[CATEGORIES.length - 1];
 
   return (
-    <div className={`p-4 rounded-xl border transition-all ${skill.active ? "bg-gray-800/80 border-gray-700" : "bg-gray-800/40 border-gray-700/50 opacity-70"}`}>
+    <div className={`rounded-xl border border-line bg-surface px-4 py-3.5 transition ${skill.active ? "" : "opacity-60"}`}>
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-lg">{category.icon}</span>
-            <h4 className="font-semibold text-white truncate">{skill.name}</h4>
-            <span className={`px-2 py-0.5 rounded-full text-xs ${skill.active ? "bg-green-900/50 text-green-400" : "bg-gray-700 text-gray-400"}`}>
+            <h4 className="font-semibold text-fg truncate">{skill.name}</h4>
+            <span className={`px-2 py-0.5 rounded-full text-[11px] ${skill.active ? "bg-primary/10 text-primary-ink" : "bg-surface-2 text-fg-muted"}`}>
               {skill.active ? "已启用" : "已禁用"}
             </span>
           </div>
-          <p className="text-sm text-gray-400 mb-2">{skill.description}</p>
+          <p className="mb-2 text-sm text-fg-muted">{skill.description}</p>
 
           {skill.tags.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mb-2">
               {skill.tags.map((tag) => (
-                <span key={tag} className="px-2 py-0.5 bg-gray-700/80 text-gray-300 rounded-full text-xs">
+                <span key={tag} className="rounded-full bg-surface-2 px-2 py-0.5 text-[11px] text-fg-muted">
                   #{tag}
                 </span>
               ))}
@@ -351,19 +351,20 @@ function SkillCard({
         </div>
 
         <div className="flex items-center gap-1 flex-shrink-0">
-          <button onClick={onToggle} className="p-2 text-green-400 hover:bg-green-900/30 rounded-lg transition-colors" title={skill.active ? "禁用" : "启用"}>
+          {/* 操作按钮统一成浅色小按钮，只有删除用红色 */}
+          <button onClick={onToggle} className="rounded-lg px-2.5 py-1.5 text-xs text-fg-muted transition hover:bg-surface-2 hover:text-fg" title={skill.active ? "停用" : "启用"}>
             {skill.active ? "停用" : "启用"}
           </button>
-          <button onClick={onEdit} className="p-2 text-blue-400 hover:bg-blue-900/30 rounded-lg transition-colors" title="编辑">
+          <button onClick={onEdit} className="rounded-lg px-2.5 py-1.5 text-xs text-fg-muted transition hover:bg-surface-2 hover:text-fg" title="编辑">
             编辑
           </button>
-          <button onClick={onExport} className="p-2 text-purple-400 hover:bg-purple-900/30 rounded-lg transition-colors" title="导出 JSON">
+          <button onClick={onExportMarkdown} className="rounded-lg px-2.5 py-1.5 text-xs text-fg-muted transition hover:bg-surface-2 hover:text-fg" title="导出 SKILL.md（Agent Skills 格式）">
+            导出
+          </button>
+          <button onClick={onExport} className="rounded-lg px-2.5 py-1.5 text-xs text-fg-muted transition hover:bg-surface-2 hover:text-fg" title="导出 JSON">
             JSON
           </button>
-          <button onClick={onExportMarkdown} className="p-2 text-purple-400 hover:bg-purple-900/30 rounded-lg transition-colors" title="导出 SKILL.md（可与 OpenMausBot / Agent Skills 互通）">
-            MD
-          </button>
-          <button onClick={onDelete} className="p-2 text-red-400 hover:bg-red-900/30 rounded-lg transition-colors" title="删除">
+          <button onClick={onDelete} className="rounded-lg px-2.5 py-1.5 text-xs text-danger transition hover:bg-danger/10" title="删除">
             删除
           </button>
         </div>

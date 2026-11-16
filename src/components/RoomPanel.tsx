@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import { PageHeader } from "./ui";
 import { ArrowUp, Square } from "lucide-react";
 import { askBot, isRoomSkip, resolveTargets, type RoomHistoryItem } from "../agent/rooms";
 import { useBotStore } from "../store/bots";
@@ -138,16 +139,11 @@ export function RoomPanel({ onClose }: RoomPanelProps) {
 
   return (
     <div className={`chat-window ${themeClass} flex h-screen flex-col`}>
-      <div className="flex items-center gap-3 border-b border-gray-700 ui-panel px-4 py-3">
-        <button onClick={onClose} className="text-gray-400 transition-colors hover:text-white" aria-label="返回聊天">
-          ←
-        </button>
-        <div>
-          <div className="font-semibold">团队房间</div>
-          <div className="text-xs ui-muted">多个成员在同一话题下协作，用 @ 指派</div>
-        </div>
-        <span className="ml-auto text-xs ui-muted">{rooms.length} 个房间</span>
-      </div>
+      <PageHeader
+        title="团队房间"
+        description={`多个成员一起讨论同一件事，用 @ 指定谁回答 · ${rooms.length} 个房间`}
+        onBack={onClose}
+      />
 
       <div className="flex flex-1 overflow-hidden">
         <aside className="w-56 shrink-0 overflow-y-auto border-r border-gray-700 p-3">

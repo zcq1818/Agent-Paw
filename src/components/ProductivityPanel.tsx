@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { PageHeader } from "./ui";
 import { calendarStore, todoStore } from "../agent/tools";
 import { useThemeClass } from "../store/theme";
 
@@ -46,21 +47,15 @@ export function ProductivityPanel({ onClose }: ProductivityPanelProps) {
   };
 
   return (
-    <div className={`chat-window ${themeClass} flex flex-col h-screen`}>
-      <div className="flex items-center justify-between px-4 py-3 bg-gray-800/80 border-b border-gray-700">
-        <div className="flex items-center gap-3">
-          <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
-            ←
-          </button>
-          <span className="font-semibold text-white">任务与日程</span>
-        </div>
-        <span className="text-xs text-gray-400">
-          待办 {stats.total - stats.completed} / {stats.total}
-        </span>
-      </div>
+    <div className={`chat-window ${themeClass} flex flex-col h-screen bg-app`}>
+      <PageHeader
+        title="任务与日程"
+        description={`还有 ${stats.total - stats.completed} 项待办，共 ${stats.total} 项。也可以直接对桌宠说“提醒我…”`}
+        onBack={onClose}
+      />
 
-      <div className="flex-1 overflow-y-auto px-4 py-5 space-y-5">
-        <section className="grid grid-cols-3 gap-2">
+      <div className="flex-1 overflow-y-auto page-pad py-5 space-y-6">
+        <section className="grid grid-cols-3 gap-3">
           <StatCard label="未完成" value={stats.total - stats.completed} tone="yellow" />
           <StatCard label="已逾期" value={stats.overdue} tone={stats.overdue > 0 ? "red" : "gray"} />
           <StatCard label="高优先" value={stats.byPriority.high} tone="blue" />
@@ -214,19 +209,13 @@ export function ProductivityPanel({ onClose }: ProductivityPanelProps) {
 }
 
 function StatCard({ label, value, tone }: { label: string; value: number; tone: "yellow" | "red" | "blue" | "gray" }) {
-  const toneClass =
-    tone === "yellow"
-      ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-300"
-      : tone === "red"
-        ? "border-red-500/30 bg-red-500/10 text-red-300"
-        : tone === "blue"
-          ? "border-blue-500/30 bg-blue-500/10 text-blue-300"
-          : "border-gray-700 bg-gray-800/70 text-gray-400";
+  // 只给数字上色，卡片本身统一白底细边框
+  const toneClass = tone === "yellow" ? "text-primary-ink" : tone === "red" ? "text-danger" : "text-fg";
 
   return (
-    <div className={`rounded-lg border p-3 ${toneClass}`}>
-      <div className="text-lg font-semibold leading-none">{value}</div>
-      <div className="mt-1 text-xs opacity-80">{label}</div>
+    <div className="rounded-xl border border-line bg-surface px-4 py-3">
+      <div className={`text-2xl font-semibold tabular-nums leading-tight ${toneClass}`}>{value}</div>
+      <div className="mt-0.5 text-xs text-fg-muted">{label}</div>
     </div>
   );
 }

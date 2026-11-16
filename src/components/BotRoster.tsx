@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PageHeader } from "./ui";
 import { useChatStore } from "../store/chat";
 import { PROVIDER_PRESETS, loadConfig } from "../agent/kernel";
 import type { PetAvatar, PetSkin } from "../store/pet";
@@ -176,17 +177,11 @@ export function BotRoster({ onClose }: BotRosterProps) {
 
   return (
     <div className={`chat-window ${themeClass} flex h-screen flex-col`}>
-      <div className="flex items-center gap-3 border-b border-gray-700 ui-panel px-4 py-3">
-        <button onClick={onClose} className="text-gray-400 transition-colors hover:text-white" aria-label="返回聊天">
-          ←
-        </button>
-        <div>
-          <div className="font-semibold">Paw 团队</div>
-          <div className="text-xs ui-muted">
-            通讯录式 Bot 团队 · 当前 {visibleBots.length} 位 · 正在使用「{bots.find((b) => b.id === activeBotId)?.name || "—"}」
-          </div>
-        </div>
-      </div>
+      <PageHeader
+        title="团队"
+        description={`${visibleBots.length} 位成员 · 正在使用「${bots.find((b) => b.id === activeBotId)?.name || "—"}」`}
+        onBack={onClose}
+      />
 
       <div className="flex flex-1 overflow-hidden">
         <div className="w-64 shrink-0 overflow-y-auto border-r border-gray-700 p-3">

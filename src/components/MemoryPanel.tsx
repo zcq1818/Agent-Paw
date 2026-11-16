@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Button, PageHeader, StatTile } from "./ui";
 import { memoryStore, type Memory, type MemoryPriority, type MemoryType } from "../agent/memory";
 import { useThemeClass } from "../store/theme";
 
@@ -95,40 +96,25 @@ export function MemoryPanel({ onClose }: MemoryPanelProps) {
   };
 
   return (
-    <div className={`chat-window ${themeClass} flex h-screen flex-col`}>
-      <div className="border-b border-gray-700 bg-gray-800/80 px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <button onClick={onClose} className="text-gray-400 transition-colors hover:text-white" aria-label="返回工作台">
-              ←
-            </button>
-            <div>
-              <div className="font-semibold text-white">本地记忆</div>
-              <div className="text-xs text-gray-400">只保存在本机，用来让桌宠更懂你。</div>
-            </div>
-          </div>
-          <button onClick={refresh} className="rounded-lg bg-gray-700 px-3 py-1.5 text-xs text-gray-100 hover:bg-gray-600">
+    <div className={`chat-window ${themeClass} flex h-screen flex-col bg-app`}>
+      <PageHeader
+        title="记忆"
+        description="桌宠记住的关于你的事，只存在本机，回答时会参考"
+        onBack={onClose}
+        actions={
+          <Button size="sm" variant="secondary" onClick={refresh}>
             刷新
-          </button>
-        </div>
+          </Button>
+        }
+      />
+
+      <div className="page-pad grid grid-cols-3 gap-3 pt-5">
+        <StatTile value={counts.total} label="全部" />
+        <StatTile value={counts.high} label="高优先级" tone="primary" />
+        <StatTile value={counts.expired} label="已过期" tone={counts.expired ? "danger" : "default"} />
       </div>
 
-      <div className="grid grid-cols-3 gap-2 border-b border-gray-800 px-4 py-3 text-center text-xs">
-        <div className="bg-gray-800/60 p-3">
-          <div className="text-lg font-bold text-white">{counts.total}</div>
-          <div className="text-gray-400">全部</div>
-        </div>
-        <div className="bg-gray-800/60 p-3">
-          <div className="text-lg font-bold text-yellow-300">{counts.high}</div>
-          <div className="text-gray-400">高优先级</div>
-        </div>
-        <div className="bg-gray-800/60 p-3">
-          <div className="text-lg font-bold text-red-300">{counts.expired}</div>
-          <div className="text-gray-400">已过期</div>
-        </div>
-      </div>
-
-      <div className="space-y-2 border-b border-gray-800 px-4 py-3">
+      <div className="page-pad space-y-2 py-4">
         <div className="grid grid-cols-[1fr_120px] gap-2">
           <input className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索记忆内容或标签" />
           <select className="input" value={type} onChange={(event) => setType(event.target.value as "all" | MemoryType)}>
@@ -159,7 +145,7 @@ export function MemoryPanel({ onClose }: MemoryPanelProps) {
         </div>
       </div>
 
-      <div className="flex-1 space-y-2 overflow-y-auto px-4 py-3">
+      <div className="flex-1 space-y-2 overflow-y-auto page-pad pb-6 pt-1">
         {loading && <div className="py-12 text-center text-sm text-gray-400">正在读取本地记忆...</div>}
         {!loading && filtered.length === 0 && <div className="py-12 text-center text-sm text-gray-500">暂时没有匹配的记忆。</div>}
         {filtered.map((memory) => (

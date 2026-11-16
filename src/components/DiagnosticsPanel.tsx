@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Button, PageHeader } from "./ui";
 import { getSecurityLogs } from "../agent/kernel";
 import { useThemeClass } from "../store/theme";
 
@@ -27,20 +28,19 @@ export function DiagnosticsPanel({ onClose }: DiagnosticsPanelProps) {
   );
 
   return (
-    <div className={`chat-window ${themeClass} flex flex-col h-screen`}>
-      <div className="flex items-center justify-between px-4 py-3 bg-gray-800/80 border-b border-gray-700">
-        <div className="flex items-center gap-3">
-          <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
-            ←
-          </button>
-          <span className="font-semibold text-white">运行日志</span>
-        </div>
-        <button className="text-xs text-yellow-400 hover:text-yellow-300" onClick={() => setVersion((value) => value + 1)}>
-          刷新
-        </button>
-      </div>
+    <div className={`chat-window ${themeClass} flex flex-col h-screen bg-app`}>
+      <PageHeader
+        title="运行日志"
+        description="桌宠运行时记下的错误和提示，排查问题时看"
+        onBack={onClose}
+        actions={
+          <Button size="sm" variant="secondary" onClick={() => setVersion((value) => value + 1)}>
+            刷新
+          </Button>
+        }
+      />
 
-      <div className="border-b border-gray-800 bg-gray-900/70 px-4 py-3">
+      <div className="page-pad pt-4">
         <div className="flex gap-1 overflow-x-auto rounded-lg border border-gray-700 bg-gray-800/70 p-0.5 text-xs">
           {[
             ["all", "全部"],
@@ -54,7 +54,7 @@ export function DiagnosticsPanel({ onClose }: DiagnosticsPanelProps) {
               type="button"
               onClick={() => setLevelFilter(value as typeof levelFilter)}
               className={`shrink-0 rounded-md px-2 py-1 transition-colors ${
-                levelFilter === value ? "bg-yellow-500 text-gray-900" : "text-gray-400 hover:text-white"
+                levelFilter === value ? "bg-primary text-primary-fg" : "text-fg-muted hover:text-fg"
               }`}
             >
               {label} {counts[value as keyof typeof counts]}
@@ -63,7 +63,7 @@ export function DiagnosticsPanel({ onClose }: DiagnosticsPanelProps) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
+      <div className="flex-1 overflow-y-auto page-pad py-4 space-y-2">
         {logs.length === 0 ? (
           <div className="h-full flex items-center justify-center text-sm text-gray-500">暂无日志。</div>
         ) : (

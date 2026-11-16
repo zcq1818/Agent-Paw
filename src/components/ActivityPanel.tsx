@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { PageHeader, Switch } from "./ui";
 import { useActivityStore } from "../store/activity";
 import { useThemeClass } from "../store/theme";
 
@@ -31,29 +32,18 @@ export function ActivityPanel({ onClose }: ActivityPanelProps) {
   const refreshSummary = () => setSummary(getSummary());
 
   return (
-    <div className={`chat-window ${themeClass} flex h-screen flex-col`}>
-      <div className="border-b border-gray-700 bg-gray-800/80 px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <button onClick={onClose} className="text-gray-400 transition-colors hover:text-white" aria-label="返回工作台">
-              ←
-            </button>
-            <div>
-              <div className="font-semibold text-white">活动观察</div>
-              <div className="text-xs text-gray-400">本地记录前台窗口名称，不截图、不读键盘、不上传。</div>
-            </div>
-          </div>
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-200">
-            <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
-            启用
-          </label>
-        </div>
-      </div>
+    <div className={`chat-window ${themeClass} flex h-screen flex-col bg-app`}>
+      <PageHeader
+        title="电脑活动"
+        description="只记前台窗口名称，不截图、不记按键、不上传"
+        onBack={onClose}
+        actions={<Switch label="启用活动观察" checked={enabled} onChange={setEnabled} />}
+      />
 
-      <div className="space-y-3 border-b border-gray-800 px-4 py-3">
-        <pre className="max-h-44 overflow-y-auto whitespace-pre-wrap bg-gray-900/70 p-3 text-xs leading-relaxed text-gray-200">{summary}</pre>
+      <div className="page-pad space-y-3 py-4">
+        <pre className="max-h-44 overflow-y-auto whitespace-pre-wrap rounded-xl border border-line bg-surface p-3 text-xs leading-relaxed text-fg">{summary}</pre>
         <div className="flex gap-2">
-          <button onClick={refreshSummary} className="rounded-lg bg-yellow-500 px-3 py-1.5 text-sm font-bold text-gray-900 hover:bg-yellow-400">
+          <button onClick={refreshSummary} className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-fg hover:brightness-110">
             重新分析
           </button>
           <button
@@ -70,7 +60,7 @@ export function ActivityPanel({ onClose }: ActivityPanelProps) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-3">
+      <div className="flex-1 overflow-y-auto page-pad py-3">
         {visibleEntries.length === 0 && <div className="py-12 text-center text-sm text-gray-500">还没有活动记录。</div>}
         <div className="space-y-2">
           {visibleEntries.map((entry) => (

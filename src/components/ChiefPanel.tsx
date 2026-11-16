@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PageHeader } from "./ui";
 import { useThemeClass } from "../store/theme";
 import { useExpertStore } from "../store/experts";
 import { checkLocalClaude, type LocalClaudeStatus } from "../agent/localClaude";
@@ -72,18 +73,13 @@ export function ChiefPanel({ onClose }: ChiefPanelProps) {
 
   return (
     <div className={`chat-window ${themeClass} flex h-screen flex-col`}>
-      <div className="ui-panel flex items-center gap-3 border-b px-4 py-3">
-        <button onClick={onClose} className="ui-muted transition-colors hover:underline" aria-label="返回聊天">
-          ←
-        </button>
-        <div>
-          <div className="font-semibold">大总管</div>
-          <div className="ui-muted text-xs">桌宠拆解任务 → 委派专家模型 → 汇总结果</div>
-        </div>
-        <span className="ui-muted ml-auto text-xs">{results.length > 0 ? `${results.length} 份结果` : "待命"}</span>
-      </div>
+      <PageHeader
+        title="总管"
+        description={`把一件事拆给多个专家模型同时做，再汇总 · ${results.length > 0 ? `${results.length} 份结果` : "待命"}`}
+        onBack={onClose}
+      />
 
-      <div className="flex-1 space-y-4 overflow-y-auto p-4">
+      <div className="flex-1 space-y-4 overflow-y-auto page-pad py-5">
         <section className="ui-panel rounded-xl border p-4">
           <div className="mb-2 text-sm font-semibold">下发任务</div>
           <textarea

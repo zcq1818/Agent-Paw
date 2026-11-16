@@ -26,10 +26,11 @@
   --danger: 200 60 60;
   --success: 22 150 100;
   --shadow: 4 30 66;
-  --sidebar: 4 30 66;
-  --sidebar-fg: 244 244 244;
-  --sidebar-muted: 141 153 174;
-  --sidebar-hover: 18 52 98;
+  /* 浅色侧边栏：浅灰底 + 深蓝字，和内容区用细线分开 */
+  --sidebar: 247 248 250;
+  --sidebar-fg: 4 30 66;
+  --sidebar-muted: 104 117 138;
+  --sidebar-hover: 233 238 244;
 
   --gray-50: 2 20 46;
   --gray-100: 4 30 66;
@@ -737,4 +738,10 @@ textarea.input {
   border-radius: 0;
   box-shadow: none;
   outline: none;
+}
+
+/* 工作台页面内容：左右至少 1.5rem，屏幕宽时内容居中、最宽 64rem，不用额外包一层 */
+.page-pad {
+  padding-left: max(1.5rem, calc((100% - 64rem) / 2));
+  padding-right: max(1.5rem, calc((100% - 64rem) / 2));
 }

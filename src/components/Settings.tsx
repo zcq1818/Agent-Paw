@@ -68,6 +68,8 @@ import { CLAUDE_MODEL_OPTIONS, CODEBUDDY_MODEL_OPTIONS, LOCAL_AGENT_LABELS, loca
 
 interface SettingsProps {
   onBack: () => void;
+  /** 打开时直接停在哪个分区（启动器跳过来时用） */
+  initialSection?: string;
   /** 窄窗口下打开侧边栏抽屉。 */
   onOpenSidebar?: () => void;
 }
@@ -115,11 +117,13 @@ const ROAM_SCOPE_OPTIONS: { value: RoamScope; label: string }[] = [
 ];
 
 
-export function Settings({ onBack, onOpenSidebar }: SettingsProps) {
+export function Settings({ onBack, onOpenSidebar, initialSection }: SettingsProps) {
   const themeClass = useThemeClass();
   const avatarOptions = useAvatarOptions();
   const [showCustomSkills, setShowCustomSkills] = useState(false);
-  const [activeSection, setActiveSection] = useState<SettingsSection>("model");
+  const [activeSection, setActiveSection] = useState<SettingsSection>(() =>
+    SECTIONS.some((section) => section.id === initialSection) ? (initialSection as SettingsSection) : "model"
+  );
   // 能力开关读全局配置；模型字段读“正在编辑的那套模型”（不能用 loadConfig()，那会带上当前 Bot 的覆盖）。
   const config = loadConfig();
   const [initialProfiles] = useState(() => ensureModelProfiles());

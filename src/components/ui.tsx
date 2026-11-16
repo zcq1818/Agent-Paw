@@ -324,3 +324,71 @@ export function useElementWidth<T extends HTMLElement>() {
   }, []);
   return { ref, width };
 }
+
+/** 窗口是否窄到侧边栏收起成抽屉（和工作台的断点一致）。 */
+function useNarrowWindow(breakpoint = 760) {
+  const [narrow, setNarrow] = useState(() => (typeof window !== "undefined" ? window.innerWidth < breakpoint : false));
+  useEffect(() => {
+    const onResize = () => setNarrow(window.innerWidth < breakpoint);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [breakpoint]);
+  return narrow;
+}
+
+/**
+ * 工作台各页面统一的顶栏：标题 + 一句说明在左，操作按钮在右。
+ * 左侧导航一直在，所以“返回”只在窗口窄、侧边栏收起时出现。
+ */
+export function PageHeader({
+  title,
+  description,
+  actions,
+  onBack,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  actions?: ReactNode;
+  onBack?: () => void;
+}) {
+  const narrow = useNarrowWindow();
+  return (
+    <header className="flex min-h-[60px] shrink-0 items-center gap-3 border-b border-line bg-surface px-4 py-2.5 sm:px-6">
+      {narrow && onBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="返回"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-fg-muted transition hover:bg-surface-2 hover:text-fg"
+        >
+          ←
+        </button>
+      )}
+      <div className="min-w-0 flex-1">
+        <h1 className="truncate text-[15px] font-semibold text-fg">{title}</h1>
+        {description && <p className="truncate text-xs text-fg-muted">{description}</p>}
+      </div>
+      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+    </header>
+  );
+}
+
+/** 页面主体：统一的背景、内边距和最大宽度。 */
+export function PageBody({ children, className = "", wide = false }: { children: ReactNode; className?: string; wide?: boolean }) {
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto bg-app">
+      <div className={`mx-auto w-full ${wide ? "max-w-6xl" : "max-w-4xl"} px-4 py-5 sm:px-6 ${className}`}>{children}</div>
+    </div>
+  );
+}
+
+/** 统计小卡片：数字 + 说明。tone 只用来给数字上色。 */
+export function StatTile({ value, label, tone = "default" }: { value: ReactNode; label: ReactNode; tone?: "default" | "primary" | "danger" | "accent" }) {
+  const color = { default: "text-fg", primary: "text-primary-ink", danger: "text-danger", accent: "text-accent" }[tone];
+  return (
+    <div className="rounded-xl border border-line bg-surface px-4 py-3">
+      <div className={`text-2xl font-semibold tabular-nums ${color}`}>{value}</div>
+      <div className="mt-0.5 text-xs text-fg-muted">{label}</div>
+    </div>
+  );
+}

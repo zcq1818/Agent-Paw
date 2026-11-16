@@ -35,7 +35,7 @@ import { CustomSkillsSettings } from "./CustomSkillsSettings";
 import { ProductivityPanel } from "./ProductivityPanel";
 import { ActivityPanel } from "./ActivityPanel";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
-import { useElementWidth } from "./ui";
+import { PageHeader, useElementWidth } from "./ui";
 import { McpServersCard } from "./McpSettings";
 
 export type WorkbenchView =
@@ -92,25 +92,12 @@ function saveHiddenNav(hidden: WorkbenchView[]) {
 }
 
 /** 侧边栏里的“MCP 服务”入口：直接管理外部服务，不用进设置找。 */
-function McpPage({ onClose, onOpenSidebar }: { onClose: () => void; onOpenSidebar?: () => void }) {
+function McpPage({ onClose }: { onClose: () => void }) {
   return (
     <div className="flex h-screen flex-col bg-app">
-      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface px-4">
-        <button
-          type="button"
-          onClick={onOpenSidebar || onClose}
-          className="text-fg-muted transition hover:text-fg"
-          aria-label={onOpenSidebar ? "打开侧边栏" : "返回聊天"}
-        >
-          ←
-        </button>
-        <div className="font-semibold text-fg">MCP 服务</div>
-        <span className="text-xs text-fg-muted">接入 Jira、Slack 等外部工具，桌宠聊天时就能用</span>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
-        <div className="mx-auto max-w-4xl">
-          <McpServersCard />
-        </div>
+      <PageHeader title="MCP 服务" description="接入 Jira、Notion、Slack 等外部工具，桌宠聊天时就能直接用" onBack={onClose} />
+      <div className="min-h-0 flex-1 overflow-y-auto page-pad py-5">
+        <McpServersCard />
       </div>
     </div>
   );
@@ -142,6 +129,7 @@ function formatRelative(iso: string) {
 export function Workbench() {
   const themeClass = useThemeClass();
   const [view, setView] = useState<WorkbenchView>("chat");
+  const [settingsSection, setSettingsSection] = useState<string | undefined>(undefined);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { ref, width } = useElementWidth<HTMLDivElement>();
   const narrow = width < SIDEBAR_BREAKPOINT;
@@ -154,6 +142,16 @@ export function Workbench() {
       promise.then((fn) => (disposed ? fn() : unlisteners.push(fn))).catch(() => {});
     track(listen("open-chat", () => setView("chat")));
     track(listen("open-settings", () => setView("settings")));
+    // 启动器 / 桌宠菜单跳到任意页面：{ view, section }（section 是设置页里的分区）
+    track(
+      listen<{ view?: WorkbenchView; section?: string }>("open-view", (event) => {
+        const next = event.payload?.view;
+        if (!next) return;
+        if (event.payload?.section) setSettingsSection(event.payload.section);
+        setView(next);
+        setDrawerOpen(false);
+      })
+    );
     return () => {
       disposed = true;
       unlisteners.forEach((fn) => fn());
@@ -178,7 +176,7 @@ export function Workbench() {
       content = <ChatView onOpenSidebar={openSidebar} onOpenSettings={() => navigate("settings")} />;
       break;
     case "settings":
-      content = <Settings onBack={backToChat} onOpenSidebar={openSidebar} />;
+      content = <Settings key={settingsSection} initialSection={settingsSection} onBack={backToChat} onOpenSidebar={openSidebar} />;
       break;
     case "team":
       content = <BotRoster onClose={backToChat} />;
@@ -205,7 +203,7 @@ export function Workbench() {
       content = <DiagnosticsPanel onClose={backToChat} />;
       break;
     case "mcp":
-      content = <McpPage onClose={backToChat} onOpenSidebar={openSidebar} />;
+      content = <McpPage onClose={backToChat} />;
       break;
   }
 
@@ -274,10 +272,10 @@ function Sidebar({
   );
 
   return (
-    <aside className="flex h-full flex-col bg-sidebar text-sidebar-fg">
+    <aside className="flex h-full flex-col border-r border-line bg-sidebar text-sidebar-fg">
       <div className="flex items-center gap-2.5 px-4 pb-3 pt-4">
         {activeBot ? (
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-surface shadow-sm ring-1 ring-line">
             <BotAvatar bot={activeBot} size={28} />
           </span>
         ) : (
@@ -337,7 +335,7 @@ function Sidebar({
         </div>
       </div>
 
-      <nav className="border-t border-white/10 px-2 py-3">
+      <nav className="border-t border-line px-2 py-3">
         {NAV_GROUPS.map((group) => {
           const items = customizing ? group.items : group.items.filter((item) => !hidden.includes(item.view));
           if (items.length === 0) return null;
@@ -419,7 +417,7 @@ function NavItem({ active, icon, label, onClick }: { active: boolean; icon: Reac
       onClick={onClick}
       aria-current={active ? "page" : undefined}
       className={`flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-sm transition ${
-        active ? "bg-sidebar-hover text-sidebar-fg" : "text-sidebar-muted hover:bg-sidebar-hover hover:text-sidebar-fg"
+        active ? "bg-primary/10 font-medium text-sidebar-fg" : "text-sidebar-muted hover:bg-sidebar-hover hover:text-sidebar-fg"
       }`}
     >
       <span className={active ? "text-primary" : ""}>{icon}</span>
@@ -469,7 +467,7 @@ function ConversationItem({
   return (
     <div
       className={`group relative flex h-9 items-center rounded-lg transition ${
-        active ? "bg-sidebar-hover" : "hover:bg-sidebar-hover/70"
+        active ? "bg-surface shadow-sm ring-1 ring-line" : "hover:bg-sidebar-hover/70"
       }`}
     >
       {active && <span className="absolute left-0 top-2 h-5 w-0.5 rounded-full bg-primary" aria-hidden="true" />}
@@ -493,7 +491,7 @@ function ConversationItem({
         onClick={onDelete}
         aria-label="删除对话"
         title="删除对话"
-        className="mr-1 hidden h-7 w-7 shrink-0 items-center justify-center rounded-md text-sidebar-muted hover:bg-white/10 hover:text-sidebar-fg group-hover:flex"
+        className="mr-1 hidden h-7 w-7 shrink-0 items-center justify-center rounded-md text-sidebar-muted hover:bg-sidebar-hover hover:text-sidebar-fg group-hover:flex"
       >
         <Trash2 size={14} />
       </button>
