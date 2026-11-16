@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, PageHeader, StatTile } from "./ui";
+import { Brain, Plus, Trash2 } from "lucide-react";
+import { Button, EmptyState, FilterChips, PageHeader, SearchInput, relativeTime } from "./ui";
 import { memoryStore, type Memory, type MemoryPriority, type MemoryType } from "../agent/memory";
 import { useThemeClass } from "../store/theme";
 
@@ -15,6 +16,15 @@ const TYPE_LABELS: Record<MemoryType, string> = {
   task: "任务",
 };
 
+/** 类型用不同的小色点区分，颜色都在品牌色系里 */
+const TYPE_DOT: Record<MemoryType, string> = {
+  preference: "bg-primary",
+  fact: "bg-[#8D99AE]",
+  habit: "bg-[#041E42] dark:bg-[#8D99AE]",
+  important: "bg-accent",
+  task: "bg-primary/50",
+};
+
 const PRIORITY_LABELS: Record<MemoryPriority, string> = {
   high: "高",
   medium: "中",
@@ -28,6 +38,7 @@ export function MemoryPanel({ onClose }: MemoryPanelProps) {
   const [type, setType] = useState<"all" | MemoryType>("all");
   const [loading, setLoading] = useState(true);
   const [manualContent, setManualContent] = useState("");
+  const [notice, setNotice] = useState("");
 
   const refresh = async () => {
     setLoading(true);
@@ -53,26 +64,24 @@ export function MemoryPanel({ onClose }: MemoryPanelProps) {
   }, [memories, query, type]);
 
   const counts = useMemo(() => {
-    const result = { total: memories.length, high: 0, expired: 0 };
+    const byType: Record<string, number> = {};
+    let high = 0;
+    let expired = 0;
     const now = Date.now();
     for (const memory of memories) {
-      if (memory.priority === "high") result.high += 1;
-      if (memory.expiresAt && new Date(memory.expiresAt).getTime() <= now) result.expired += 1;
+      byType[memory.type] = (byType[memory.type] || 0) + 1;
+      if (memory.priority === "high") high += 1;
+      if (memory.expiresAt && new Date(memory.expiresAt).getTime() <= now) expired += 1;
     }
-    return result;
+    return { byType, high, expired };
   }, [memories]);
 
   const addManualMemory = async () => {
     const content = manualContent.trim();
     if (!content) return;
-    await memoryStore.add({
-      type: "important",
-      content,
-      tags: ["manual"],
-      priority: "medium",
-      importance: 6,
-    });
+    await memoryStore.add({ type: "important", content, tags: ["manual"], priority: "medium", importance: 6 });
     setManualContent("");
+    setNotice("记住了。");
     refresh();
   };
 
@@ -84,91 +93,115 @@ export function MemoryPanel({ onClose }: MemoryPanelProps) {
 
   const cleanupExpired = async () => {
     await memoryStore.cleanupExpired();
+    setNotice(counts.expired ? `清理了 ${counts.expired} 条过期记忆。` : "没有过期的记忆。");
     refresh();
   };
 
   const cleanupDuplicates = async () => {
     const removed = await memoryStore.cleanupDuplicates();
     await refresh();
-    if (removed > 0) {
-      alert(`已合并并删除 ${removed} 条重复记忆。`);
-    }
+    setNotice(removed > 0 ? `合并并删除了 ${removed} 条重复记忆。` : "没有重复的记忆。");
   };
+
+  const typeOptions = [
+    { value: "all" as const, label: "全部", count: memories.length },
+    ...(Object.keys(TYPE_LABELS) as MemoryType[])
+      .filter((key) => counts.byType[key])
+      .map((key) => ({ value: key, label: TYPE_LABELS[key], count: counts.byType[key] })),
+  ];
 
   return (
     <div className={`chat-window ${themeClass} flex h-screen flex-col bg-app`}>
       <PageHeader
         title="记忆"
-        description="桌宠记住的关于你的事，只存在本机，回答时会参考"
+        description={`桌宠记住的关于你的事，回答时会参考 · 共 ${memories.length} 条${counts.high ? `，${counts.high} 条重要` : ""}`}
         onBack={onClose}
         actions={
-          <Button size="sm" variant="secondary" onClick={refresh}>
-            刷新
-          </Button>
+          <>
+            <Button size="sm" variant="ghost" onClick={cleanupDuplicates} title="合并内容重复的记忆">
+              去重
+            </Button>
+            <Button size="sm" variant="ghost" onClick={cleanupExpired} title="删除已经过期的记忆">
+              清理过期{counts.expired ? ` ${counts.expired}` : ""}
+            </Button>
+          </>
         }
       />
 
-      <div className="page-pad grid grid-cols-3 gap-3 pt-5">
-        <StatTile value={counts.total} label="全部" />
-        <StatTile value={counts.high} label="高优先级" tone="primary" />
-        <StatTile value={counts.expired} label="已过期" tone={counts.expired ? "danger" : "default"} />
-      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="page-pad space-y-4 py-5">
+          {/* 手动记一条 */}
+          <div className="flex items-center gap-2 rounded-xl border border-line bg-surface p-1.5 pl-3 transition focus-within:border-primary/60 focus-within:ring-4 focus-within:ring-primary/10">
+            <Brain size={16} className="shrink-0 text-primary" />
+            <input
+              className="chat-composer-input min-w-0 flex-1 border-0 bg-transparent py-1.5 text-sm text-fg outline-none placeholder:text-fg-muted"
+              value={manualContent}
+              onChange={(event) => setManualContent(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.nativeEvent.isComposing) addManualMemory();
+              }}
+              placeholder="让桌宠记住一件事，比如“我周三下午固定开组会”"
+            />
+            <Button size="sm" variant="primary" disabled={!manualContent.trim()} onClick={addManualMemory}>
+              <Plus size={14} />
+              记住
+            </Button>
+          </div>
 
-      <div className="page-pad space-y-2 py-4">
-        <div className="grid grid-cols-[1fr_120px] gap-2">
-          <input className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索记忆内容或标签" />
-          <select className="input" value={type} onChange={(event) => setType(event.target.value as "all" | MemoryType)}>
-            <option value="all">全部类型</option>
-            {Object.entries(TYPE_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2">
-          <input
-            className="input"
-            value={manualContent}
-            onChange={(event) => setManualContent(event.target.value)}
-            placeholder="手动添加一条重要记忆"
-          />
-          <button onClick={addManualMemory} className="rounded-lg bg-yellow-500 px-3 text-sm font-bold text-gray-900 hover:bg-yellow-400">
-            添加
-          </button>
-          <button onClick={cleanupDuplicates} className="rounded-lg bg-gray-700 px-3 text-sm text-gray-100 hover:bg-gray-600">
-            去重
-          </button>
-          <button onClick={cleanupExpired} className="rounded-lg bg-gray-700 px-3 text-sm text-gray-100 hover:bg-gray-600">
-            清理过期
-          </button>
-        </div>
-      </div>
+          {/* 搜索 + 分类 */}
+          <div className="flex flex-wrap items-center gap-3">
+            <SearchInput value={query} onChange={setQuery} placeholder="搜索内容或标签" className="w-full sm:w-64" />
+            <FilterChips value={type} options={typeOptions} onChange={setType} />
+            {notice && <span className="ml-auto text-xs text-fg-muted">{notice}</span>}
+          </div>
 
-      <div className="flex-1 space-y-2 overflow-y-auto page-pad pb-6 pt-1">
-        {loading && <div className="py-12 text-center text-sm text-gray-400">正在读取本地记忆...</div>}
-        {!loading && filtered.length === 0 && <div className="py-12 text-center text-sm text-gray-500">暂时没有匹配的记忆。</div>}
-        {filtered.map((memory) => (
-          <article key={memory.id} className="border border-gray-700 bg-gray-800/55 p-3">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="bg-yellow-500/15 px-2 py-0.5 text-yellow-200">{TYPE_LABELS[memory.type]}</span>
-                <span className="bg-gray-700 px-2 py-0.5 text-gray-300">优先级 {PRIORITY_LABELS[memory.priority]}</span>
-                <span className="text-gray-500">重要度 {memory.importance}</span>
-              </div>
-              <button onClick={() => deleteMemory(memory.id)} className="text-xs text-red-300 hover:text-red-200">
-                删除
-              </button>
-            </div>
-            <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-100">{memory.content}</p>
-            <div className="mt-2 flex flex-wrap gap-1 text-xs text-gray-500">
-              {memory.tags.map((tag) => (
-                <span key={tag}>#{tag}</span>
-              ))}
-              <span>更新于 {new Date(memory.updatedAt).toLocaleString()}</span>
-            </div>
-          </article>
-        ))}
+          {/* 列表 */}
+          <div className="overflow-hidden rounded-xl border border-line bg-surface">
+            {loading ? (
+              <div className="py-12 text-center text-sm text-fg-muted">正在读取…</div>
+            ) : filtered.length === 0 ? (
+              <EmptyState
+                icon={<Brain size={20} />}
+                title={memories.length ? "没有匹配的记忆" : "还没有记忆"}
+                hint={memories.length ? "换个关键词或分类试试。" : "聊天时说“记住……”，或者在上面直接添加。"}
+              />
+            ) : (
+              <ul className="divide-y divide-line">
+                {filtered.map((memory) => (
+                  <li key={memory.id} className="group flex items-start gap-3 px-4 py-3 transition hover:bg-surface-2/60">
+                    <span className={`mt-[7px] h-2 w-2 shrink-0 rounded-full ${TYPE_DOT[memory.type]}`} title={TYPE_LABELS[memory.type]} />
+                    <div className="min-w-0 flex-1">
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-fg">{memory.content}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-fg-muted">
+                        <span>{TYPE_LABELS[memory.type]}</span>
+                        {memory.priority === "high" && <span className="text-accent">重要</span>}
+                        {memory.priority === "low" && <span>优先级 {PRIORITY_LABELS[memory.priority]}</span>}
+                        <span>{relativeTime(memory.updatedAt)}</span>
+                        {memory.tags
+                          .filter((tag) => tag !== "manual")
+                          .slice(0, 4)
+                          .map((tag) => (
+                            <span key={tag} className="rounded bg-surface-2 px-1.5 py-px">
+                              {tag}
+                            </span>
+                          ))}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => deleteMemory(memory.id)}
+                      className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-fg-muted opacity-0 transition hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
+                      title="删除这条记忆"
+                      aria-label="删除这条记忆"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

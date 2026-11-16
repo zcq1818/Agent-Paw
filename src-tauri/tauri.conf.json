@@ -41,6 +41,20 @@
         "center": true
       },
       {
+        "label": "squad",
+        "title": "Paw 团队",
+        "width": 520,
+        "height": 210,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "focus": false,
+        "visible": false
+      },
+      {
         "label": "launcher",
         "title": "Paw 启动器",
         "width": 680,

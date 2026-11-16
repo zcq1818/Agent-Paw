@@ -9,6 +9,7 @@ import { useThemeClass } from "./store/theme";
 
 const Pet = lazy(() => import("./components/Pet").then((module) => ({ default: module.Pet })));
 const Workbench = lazy(() => import("./components/Workbench").then((module) => ({ default: module.Workbench })));
+const Squad = lazy(() => import("./components/Squad").then((module) => ({ default: module.Squad })));
 const Launcher = lazy(() => import("./components/Launcher").then((module) => ({ default: module.Launcher })));
 
 function LoadingShell() {
@@ -69,6 +70,14 @@ export default function App() {
     return (
       <Suspense fallback={null}>
         <Launcher />
+      </Suspense>
+    );
+  }
+
+  if (windowLabel === "squad") {
+    return (
+      <Suspense fallback={null}>
+        <Squad />
       </Suspense>
     );
   }

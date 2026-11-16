@@ -145,6 +145,7 @@ const APP_NAMES: Record<string, string> = {
   "obsidian.exe": "Obsidian",
   "blender.exe": "Blender",
   "paw.exe": "Paw",
+  "claude.exe": "Claude",
 };
 
 export function friendlyApp(app: string) {

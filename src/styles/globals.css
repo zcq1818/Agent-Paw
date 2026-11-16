@@ -236,6 +236,7 @@ a:focus-visible,
 }
 .themed-ui ::-webkit-scrollbar-track {
   background: transparent;
+  border: none;
 }
 
 /* 表单控件 */
@@ -744,4 +745,49 @@ textarea.input {
 .page-pad {
   padding-left: max(1.5rem, calc((100% - 64rem) / 2));
   padding-right: max(1.5rem, calc((100% - 64rem) / 2));
+}
+
+/* 团队上桌面：成员的小动作 */
+.squad-bob {
+  animation: squadBob 2.6s ease-in-out infinite;
+}
+.squad-think {
+  animation: squadThink 0.9s ease-in-out infinite;
+}
+.squad-jump {
+  animation: squadJump 0.85s cubic-bezier(0.3, 0.7, 0.4, 1);
+}
+.squad-member img {
+  filter: drop-shadow(0 4px 6px rgb(4 30 66 / 0.18));
+}
+.squad-zzz {
+  animation: squadZzz 2.4s ease-out infinite;
+}
+.squad-bubble {
+  animation: squadPop 0.22s ease-out;
+}
+@keyframes squadBob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+@keyframes squadThink {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  25% { transform: translateY(-2px) rotate(-4deg); }
+  75% { transform: translateY(-2px) rotate(4deg); }
+}
+@keyframes squadJump {
+  0% { transform: translateY(0) scale(1, 1); }
+  20% { transform: translateY(0) scale(1.08, 0.9); }
+  50% { transform: translateY(-22px) scale(0.95, 1.06); }
+  80% { transform: translateY(0) scale(1.05, 0.94); }
+  100% { transform: translateY(0) scale(1, 1); }
+}
+@keyframes squadZzz {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.8); }
+  30% { opacity: 1; }
+  100% { opacity: 0; transform: translate(8px, -16px) scale(1.2); }
+}
+@keyframes squadPop {
+  from { opacity: 0; transform: translateY(4px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }

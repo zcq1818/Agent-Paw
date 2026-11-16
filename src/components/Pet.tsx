@@ -26,6 +26,12 @@ import { fetchTodayNews, formatNewsBubble, formatNewsMarkdown } from "../agent/n
 import { getInteractionByType, getRandomInteraction, getTimeBasedGreeting } from "../utils/petInteractions";
 import { toolActionLabel, type ToolRun } from "../agent/toolEvents";
 import { HOTKEY_EVENT } from "../store/shortcut";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { describePaths, type DroppedFile } from "../agent/documents";
+import { focusStreak, muteHint, useAppHints, useDailyWrap, useGrowthStore, buildDailyWrap, wrapPrompt, todayFocusMinutes, unlocksAt, dayKey, type AppHint, type DailyWrap } from "../agent/petLife";
+import { DropCard, FocusBadge, GrowthMenuHeader, HintCard, WrapCard, type DropChoice } from "./PetCards";
+import { useBotStore, type BotRole } from "../store/bots";
+import { loadConfig } from "../agent/kernel";
 
 type PetState = "idle" | "walk" | "sit" | "sleep" | "excited" | "thinking" | "morning" | "night" | "dance" | "stretch" | "look" | "wave";
 type Facing = "left" | "right";
@@ -296,6 +302,17 @@ export function Pet() {
   const offerRef = useRef<Offer | null>(null);
   offerRef.current = offer;
   const [routineBanner, setRoutineBanner] = useState<{ title: string; subtitle: string; items: string[] } | null>(null);
+  const [dropFiles, setDropFiles] = useState<DroppedFile[] | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [wrap, setWrap] = useState<DailyWrap | null>(null);
+  const [hint, setHint] = useState<AppHint | null>(null);
+  const focus = useGrowthStore((state) => state.focus);
+  const growthTotal = useGrowthStore((state) => state.totalFocusMin);
+  const growthDays = useGrowthStore((state) => state.days);
+  const cardOpenRef = useRef(false);
+  cardOpenRef.current = Boolean(dropFiles || wrap || hint);
+  const focusRef = useRef(focus);
+  focusRef.current = focus;
 
   const dragRef = useRef<{
     pointerStart: { x: number; y: number };
@@ -365,6 +382,8 @@ export function Pet() {
       showMenu ||
       showMiniChat ||
       isStreaming ||
+      Boolean(focusRef.current) ||
+      cardOpenRef.current ||
       isQuietNow(quietHoursEnabled, quietStart, quietEnd)
     );
   }, [isDragging, isStreaming, quietEnd, quietHoursEnabled, quietStart, showMenu, showMiniChat]);
@@ -825,12 +844,19 @@ export function Pet() {
   useInitiative({
     enabled: true,
     isBusy: () =>
-      showMiniChat || isDragging || showMenu || useAgentStore.getState().isStreaming || isQuietNow(quietHoursEnabled, quietStart, quietEnd),
+      showMiniChat ||
+      isDragging ||
+      showMenu ||
+      Boolean(focusRef.current) ||
+      cardOpenRef.current ||
+      useAgentStore.getState().isStreaming ||
+      isQuietNow(quietHoursEnabled, quietStart, quietEnd),
     hasOffer: () => Boolean(offerRef.current),
     showOffer: (next) => {
       setBubbleMessage(null);
       setOffer(next);
-      setPetState("wave");
+      // 提醒休息时它自己先伸个懒腰
+      setPetState(next.kind === "break" ? "stretch" : "wave");
       setEmotion("excited");
       window.setTimeout(resetToDefaultState, 2600);
     },
@@ -874,6 +900,181 @@ export function Pet() {
     markHumanTouch();
     recordOfferFeedback(current.kind, false);
   }, [markHumanTouch]);
+
+  // ───────── 拖文件给宠物 ─────────
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    try {
+      getCurrentWebview()
+        .onDragDropEvent(async (event) => {
+          const payload = event.payload;
+          if (payload.type === "enter") {
+            setDragOver(true);
+            setPetState("excited");
+            setStatusText("放这儿～");
+          } else if (payload.type === "leave") {
+            setDragOver(false);
+            setStatusText(null);
+            setPetState(defaultStateForTime(usePetStore.getState().timeOfDay));
+          } else if (payload.type === "drop") {
+            setDragOver(false);
+            setStatusText(null);
+            markHumanTouch();
+            const paths = payload.paths || [];
+            if (!paths.length) return;
+            const files = await describePaths(paths).catch(() => []);
+            if (!files.length) return;
+            setOffer(null);
+            setHint(null);
+            setBubbleMessage(null);
+            setDropFiles(files);
+            setPetState("wave");
+            window.setTimeout(() => setPetState(defaultStateForTime(usePetStore.getState().timeOfDay)), 2400);
+          }
+        })
+        .then((fn) => {
+          if (disposed) fn();
+          else unlisten = fn;
+        })
+        .catch(() => {});
+    } catch {
+      // 浏览器预览没有 Tauri
+    }
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [markHumanTouch]);
+
+  /** 切到团队里某个角色的成员（没有这个角色就留在当前成员） */
+  const switchToRole = useCallback(async (role?: BotRole) => {
+    if (!role) return undefined;
+    const store = useBotStore.getState();
+    const bot = store.bots.find((item) => item.role === role && !item.archived);
+    if (!bot) return undefined;
+    if (store.activeBotId !== bot.id) {
+      store.switchBot(bot.id);
+      // 等会话分区切过去，消息才会写进它自己的会话
+      await wait(350);
+    }
+    return bot;
+  }, []);
+
+  const runDropChoice = useCallback(
+    async (prompt: string, role?: BotRole) => {
+      setDropFiles(null);
+      await switchToRole(role);
+      openMiniChat();
+      await runPrompt(prompt);
+    },
+    [openMiniChat, runPrompt, switchToRole]
+  );
+
+  // ───────── 下班小结 ─────────
+  useDailyWrap({
+    isBusy: () => showMiniChat || isDragging || showMenu || Boolean(focusRef.current) || cardOpenRef.current || Boolean(offerRef.current) || useAgentStore.getState().isStreaming,
+    show: (next) => {
+      setBubbleMessage(null);
+      setWrap(next);
+      setPetState("stretch");
+      window.setTimeout(resetToDefaultState, 2800);
+    },
+  });
+
+  const showWrapNow = useCallback(async () => {
+    setOffer(null);
+    setHint(null);
+    setWrap(await buildDailyWrap());
+    localStorage.setItem("paw_daily_wrap_shown", dayKey());
+    setPetState("stretch");
+    window.setTimeout(resetToDefaultState, 2800);
+  }, [resetToDefaultState]);
+
+  const runWrap = useCallback(
+    async (target: "report" | "slack" | "jira") => {
+      setWrap(null);
+      openMiniChat();
+      await runPrompt(wrapPrompt(target));
+    },
+    [openMiniChat, runPrompt]
+  );
+
+  // ───────── 按打开的软件搭话 ─────────
+  useAppHints({
+    isBusy: () =>
+      showMiniChat ||
+      isDragging ||
+      showMenu ||
+      Boolean(focusRef.current) ||
+      cardOpenRef.current ||
+      Boolean(offerRef.current) ||
+      useAgentStore.getState().isStreaming ||
+      isQuietNow(quietHoursEnabled, quietStart, quietEnd),
+    show: (next) => {
+      setBubbleMessage(null);
+      setHint(next);
+      setPetState("look");
+      window.setTimeout(resetToDefaultState, 2400);
+    },
+  });
+
+  const closeHint = useCallback(() => setHint(null), []);
+
+  const acceptHint = useCallback(async () => {
+    const current = hint;
+    if (!current) return;
+    setHint(null);
+    markHumanTouch();
+    if (current.action.type === "prompt") {
+      openMiniChat();
+      await runPrompt(current.action.prompt);
+      return;
+    }
+    const bot = await switchToRole(current.action.role);
+    openMiniChat();
+    if (bot) addMessage({ role: "assistant", content: `我是${bot.name}，${bot.tagline || "随时待命"}。有事直接说～` });
+  }, [addMessage, hint, markHumanTouch, openMiniChat, runPrompt, switchToRole]);
+
+  // ───────── 专注陪伴 ─────────
+  const startFocus = useCallback(
+    (minutes: number) => {
+      setShowMenu(false);
+      useGrowthStore.getState().startFocus(minutes);
+      setPetState("sit");
+      speak(`好，陪你专注 ${minutes} 分钟。这段时间我不打扰你。`, 3800, "sit");
+    },
+    [speak]
+  );
+
+  useEffect(() => {
+    if (!focus) return;
+    setPetState("sit");
+    const finish = () => {
+      const result = useGrowthStore.getState().finishFocus();
+      if (!result) return;
+      setPetState("dance");
+      const today = todayFocusMinutes();
+      if (result.leveledUp) {
+        speak(`专注 ${result.minutes} 分钟完成！升到 Lv${result.level} 啦，解锁了${unlocksAt(result.level).join("、")}。`, 9000, "dance");
+      } else {
+        speak(`专注 ${result.minutes} 分钟完成！今天一共 ${today} 分钟，起来活动 5 分钟吧。`, 7000, "dance");
+      }
+      window.setTimeout(resetToDefaultState, 4200);
+    };
+    const left = focus.endsAt - Date.now();
+    if (left <= 0) {
+      finish();
+      return;
+    }
+    const timer = window.setTimeout(finish, left);
+    return () => window.clearTimeout(timer);
+  }, [focus, resetToDefaultState, speak]);
+
+  const cancelFocus = useCallback(() => {
+    useGrowthStore.getState().cancelFocus();
+    speak("好，先停下。下次再一起专注。", 3200, "wave");
+  }, [speak]);
 
   const sendMiniMessage = useCallback(async () => {
     const text = miniInput.trim();
@@ -1303,7 +1504,47 @@ export function Pet() {
 
   return (
     <div className={`pet-window ${themeClass} relative h-screen w-screen select-none overflow-hidden`} onContextMenu={handleContextMenu}>
-      {offer && !showMiniChat && (
+      {dropFiles && !showMiniChat && (
+        <DropCard
+          files={dropFiles}
+          canControl={loadConfig().computerControl !== "off"}
+          onPick={(choice: DropChoice) => void runDropChoice(choice.prompt, choice.role)}
+          onAsk={(text) => void runDropChoice(text)}
+          onClose={() => setDropFiles(null)}
+        />
+      )}
+
+      {wrap && !dropFiles && !showMiniChat && (
+        <WrapCard
+          wrap={wrap}
+          onReport={() => void runWrap("report")}
+          onSlack={() => void runWrap("slack")}
+          onJira={() => void runWrap("jira")}
+          onClose={() => setWrap(null)}
+        />
+      )}
+
+      {hint && !wrap && !dropFiles && !showMiniChat && (
+        <HintCard
+          hint={hint}
+          onAccept={() => void acceptHint()}
+          onMute={() => {
+            muteHint(hint.id);
+            setHint(null);
+          }}
+          onClose={closeHint}
+        />
+      )}
+
+      {focus && !showMiniChat && !dropFiles && !wrap && !hint && !offer && (
+        <FocusBadge endsAt={focus.endsAt} minutes={focus.minutes} onCancel={cancelFocus} />
+      )}
+
+      {dragOver && (
+        <div className="pointer-events-none absolute inset-2 z-30 rounded-3xl border-2 border-dashed border-primary/70 bg-primary/5" />
+      )}
+
+      {offer && !showMiniChat && !dropFiles && !wrap && !hint && (
         <div className="offer-card absolute left-4 right-4 top-4 z-40 rounded-2xl border border-line bg-surface/95 px-4 py-3 text-fg shadow-xl backdrop-blur pointer-events-auto">
           <div className="mb-1 flex items-center justify-between gap-3">
             <div className="text-sm font-semibold text-fg">{offer.title}</div>
@@ -1329,7 +1570,7 @@ export function Pet() {
         </div>
       )}
 
-      {!showMiniChat && bubbleMessage && !offer && (
+      {!showMiniChat && bubbleMessage && !offer && !dropFiles && !wrap && !hint && (
         <PetBubble
           message={bubbleMessage}
           isVisible={true}
@@ -1513,7 +1754,16 @@ export function Pet() {
           className="absolute z-50 min-w-[156px] overflow-y-auto rounded-xl border border-line bg-surface/95 py-1 shadow-2xl backdrop-blur pointer-events-auto"
           style={{ left: menuLeft, top: menuTop, maxHeight: `calc(100vh - ${menuTop + 8}px)` }}
         >
+          <GrowthMenuHeader
+            totalMin={growthTotal}
+            todayMin={growthDays[dayKey()] || 0}
+            streak={focusStreak(growthDays)}
+            focusing={Boolean(focus)}
+            onFocus={startFocus}
+          />
           <MenuItem label="聊天" onClick={() => { setShowMenu(false); openMiniChat(); }} />
+          <MenuItem label="下班小结" onClick={() => { setShowMenu(false); void showWrapNow(); }} />
+          <MenuItem label="叫团队出来" onClick={() => { setShowMenu(false); void emit("squad-toggle"); }} />
           <MenuItem label="打开工作台" onClick={() => { setShowMenu(false); showMainWindow("chat"); }} />
           <MenuItem label="切换形态" onClick={() => { setShowMenu(false); cycleAvatar(); }} />
           <MenuItem label="自己逛逛" onClick={() => { setShowMenu(false); wander(true); }} />

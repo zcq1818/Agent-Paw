@@ -135,6 +135,39 @@ const ttsTools: Tool[] = [
   },
 ];
 
+/** 把一张图（URL 或 data URL）连同问题发给当前模型看。模型不支持看图时会返回 API 错误。 */
+export async function analyzeImageUrl(imageUrl: string, question: string): Promise<string> {
+  const config = loadConfig();
+  if (!config.apiKey) return "请先在设置中配置 API Key";
+  try {
+    const resp = await fetchModelApi(buildChatCompletionsUrl(config), {
+      method: "POST",
+      headers: buildRequestHeaders(config),
+      body: JSON.stringify({
+        ...parseConfigJson(config.extraBody),
+        model: config.model,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: question },
+              { type: "image_url", image_url: { url: imageUrl } },
+            ],
+          },
+        ],
+        max_tokens: 1000,
+      }),
+    });
+
+    if (!resp.ok) return `API 错误：${resp.status}（当前模型可能不支持看图）`;
+    const data = await resp.json();
+    const content = data.choices?.[0]?.message?.content || "";
+    return `图片分析结果：\n\n${content}`;
+  } catch (error) {
+    return `图片分析失败：${error}`;
+  }
+}
+
 const visionTools: Tool[] = [
   {
     name: "analyze_image",
@@ -148,42 +181,12 @@ const visionTools: Tool[] = [
       required: ["image"],
     },
     execute: async (args) => {
-      const config = loadConfig();
-      if (!config.apiKey) return "请先在设置中配置 API Key";
-
       const imageUrl = args.image as string;
       const question = (args.question as string) || "请描述这张图片的内容";
       if (!imageUrl.startsWith("http") && !imageUrl.startsWith("data:image")) {
         return "请输入有效的图片 URL 或 base64 数据";
       }
-
-      try {
-        const resp = await fetchModelApi(buildChatCompletionsUrl(config), {
-          method: "POST",
-          headers: buildRequestHeaders(config),
-          body: JSON.stringify({
-            ...parseConfigJson(config.extraBody),
-            model: config.model,
-            messages: [
-              {
-                role: "user",
-                content: [
-                  { type: "text", text: question },
-                  { type: "image_url", image_url: { url: imageUrl } },
-                ],
-              },
-            ],
-            max_tokens: 1000,
-          }),
-        });
-
-        if (!resp.ok) return `API 错误：${resp.status}`;
-        const data = await resp.json();
-        const content = data.choices?.[0]?.message?.content || "";
-        return `图片分析结果：\n\n${content}`;
-      } catch (error) {
-        return `图片分析失败：${error}`;
-      }
+      return analyzeImageUrl(imageUrl, question);
     },
   },
   {

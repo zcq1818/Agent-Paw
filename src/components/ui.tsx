@@ -392,3 +392,99 @@ export function StatTile({ value, label, tone = "default" }: { value: ReactNode;
     </div>
   );
 }
+
+/** 带放大镜的搜索框。 */
+export function SearchInput({
+  value,
+  onChange,
+  placeholder = "搜索",
+  className = "",
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  className?: string;
+}) {
+  return (
+    <label className={`flex h-9 items-center gap-2 rounded-lg border border-line bg-surface px-3 transition focus-within:border-primary/60 focus-within:ring-4 focus-within:ring-primary/10 ${className}`}>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-fg-muted" aria-hidden="true">
+        <circle cx="11" cy="11" r="7" />
+        <path d="m20 20-3.5-3.5" strokeLinecap="round" />
+      </svg>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="chat-composer-input min-w-0 flex-1 border-0 bg-transparent text-sm text-fg outline-none placeholder:text-fg-muted"
+      />
+      {value && (
+        <button type="button" onClick={() => onChange("")} className="text-xs text-fg-muted hover:text-fg" aria-label="清空搜索">
+          ✕
+        </button>
+      )}
+    </label>
+  );
+}
+
+/** 一排可选的筛选标签，带数量。 */
+export function FilterChips<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: Array<{ value: T; label: ReactNode; count?: number }>;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {options.map((option) => {
+        const active = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+            className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-xs transition ${
+              active ? "border-primary bg-primary text-primary-fg" : "border-line bg-surface text-fg-muted hover:border-primary/50 hover:text-fg"
+            }`}
+          >
+            {option.label}
+            {option.count !== undefined && (
+              <span className={`tabular-nums ${active ? "text-primary-fg/80" : "text-fg-muted/80"}`}>{option.count}</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** 列表为空时的占位：图标 + 一句话 + 可选的提示。 */
+export function EmptyState({ icon, title, hint }: { icon?: ReactNode; title: ReactNode; hint?: ReactNode }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 px-6 py-12 text-center">
+      {icon && <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">{icon}</div>}
+      <div className="text-sm font-medium text-fg">{title}</div>
+      {hint && <div className="max-w-sm text-xs leading-relaxed text-fg-muted">{hint}</div>}
+    </div>
+  );
+}
+
+/** “3 分钟前 / 昨天 14:20 / 11月13日” */
+export function relativeTime(input: string | number | Date) {
+  const date = new Date(input);
+  const time = date.getTime();
+  if (Number.isNaN(time)) return "";
+  const diff = Date.now() - time;
+  if (diff < 60_000 && diff > -60_000) return "刚刚";
+  if (diff > 0 && diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const hm = date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  if (time >= startOfToday && time < startOfToday + 86_400_000) return `今天 ${hm}`;
+  if (time >= startOfToday - 86_400_000 && time < startOfToday) return `昨天 ${hm}`;
+  if (time >= startOfToday + 86_400_000 && time < startOfToday + 2 * 86_400_000) return `明天 ${hm}`;
+  if (date.getFullYear() === now.getFullYear()) return `${date.getMonth() + 1}月${date.getDate()}日 ${hm}`;
+  return date.toLocaleDateString("zh-CN");
+}

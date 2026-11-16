@@ -6,6 +6,7 @@ use serde::Serialize;
 mod ai_apps;
 mod claude_code;
 mod control;
+mod documents;
 mod launcher;
 mod mcp_client;
 mod oauth_callback;
@@ -457,7 +458,10 @@ pub fn run() {
             launcher::launcher_apps,
             launcher::launcher_cache_age,
             launcher::launcher_open,
-            launcher::toggle_launcher
+            launcher::toggle_launcher,
+            documents::read_document,
+            documents::describe_paths,
+            documents::read_image_data_url
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

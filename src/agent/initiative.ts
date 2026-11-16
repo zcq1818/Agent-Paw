@@ -253,6 +253,15 @@ async function computerControlOn() {
   }
 }
 
+/** 开了“下班小结”就不再单独弹写日志的提议（小结卡片里就有“写成日报”）。 */
+function dailyWrapOn() {
+  try {
+    return JSON.parse(localStorage.getItem("paw_daily_wrap") || "{}").enabled !== false;
+  } catch {
+    return true;
+  }
+}
+
 export async function findPatternOffer(): Promise<Offer | null> {
   if (!timelineEnabled()) return null;
   const now = new Date();
@@ -295,7 +304,7 @@ export async function findPatternOffer(): Promise<Offer | null> {
   }
 
   // 3. 傍晚写工作日志
-  if (hour >= 17 && hour < 23 && activeToday >= 2 * 3_600_000 && !isMuted("daily_log") && !alreadyOffered(`daily_log_${dayKey}`, 86_400_000)) {
+  if (hour >= 17 && hour < 23 && activeToday >= 2 * 3_600_000 && !dailyWrapOn() && !isMuted("daily_log") && !alreadyOffered(`daily_log_${dayKey}`, 86_400_000)) {
     markOffered(`daily_log_${dayKey}`);
     return newOffer(
       "daily_log",

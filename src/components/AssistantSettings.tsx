@@ -10,6 +10,7 @@ import {
 } from "../agent/timeline";
 import { AUTOMATIONS_KEY, describeAutomation, useAutomationStore } from "../agent/automations";
 import { loadInitiativeMode, saveInitiativeMode, type InitiativeMode } from "../agent/initiative";
+import { appHintsEnabled, loadWrapSettings, saveWrapSettings, setAppHintsEnabled } from "../agent/petLife";
 import { allFlows, runFlow, type FlowResult, type UiFlow } from "../agent/uiFlow";
 import { ALWAYS_ALLOW_KEY, loadAlwaysAllow, removeAlwaysAllow } from "../agent/tools";
 
@@ -224,6 +225,8 @@ function AppFlowsSection() {
 /** 主动助手：主动提议开关 + 自动任务列表。 */
 export function InitiativeCard({ activityEnabled }: { activityEnabled: boolean }) {
   const [mode, setMode] = useState<InitiativeMode>(loadInitiativeMode);
+  const [wrapSettings, setWrapSettings] = useState(loadWrapSettings);
+  const [hintsOn, setHintsOn] = useState(appHintsEnabled);
   const items = useAutomationStore((state) => state.items);
   const update = useAutomationStore((state) => state.update);
   const remove = useAutomationStore((state) => state.remove);
@@ -255,9 +258,54 @@ export function InitiativeCard({ activityEnabled }: { activityEnabled: boolean }
       <ul className="space-y-1 text-xs leading-relaxed text-fg-muted">
         <li>· 复制了报错 → 帮你分析；复制外文 → 翻译；复制会议时间 → 加日程（需开启“记录复制的文字”）</li>
         <li>· 每天固定时间打开同一个软件 → 提议设成自动任务</li>
-        <li>· 早上回顾昨天停在哪、傍晚帮你写工作日志、连续用电脑太久提醒休息、下载文件夹太乱提议整理</li>
+        <li>· 早上回顾昨天停在哪、连续用电脑太久提醒休息、下载文件夹太乱提议整理</li>
+        <li>· 把文件拖到桌宠身上：总结、翻译、找出要做的事；右键桌宠可以“陪我专注”，专注越多它等级越高</li>
         <li>· 同一类提议连续拒绝两次会自动少提</li>
       </ul>
+      <div className="divide-y divide-line rounded-lg border border-line">
+        <div className="flex items-center gap-3 px-3 py-2.5">
+          <div className="min-w-0 flex-1">
+            <div className="text-sm text-fg">下班小结</div>
+            <div className="text-xs text-fg-muted">到点它伸个懒腰，告诉你今天在电脑前多久、做完了什么，一键写成日报或发到 Slack / Jira</div>
+          </div>
+          <input
+            type="time"
+            className="input h-8 w-[104px] py-0 text-xs"
+            value={wrapSettings.time}
+            disabled={!wrapSettings.enabled}
+            onChange={(event) => {
+              const next = { ...wrapSettings, time: event.target.value || "18:00" };
+              saveWrapSettings(next);
+              setWrapSettings(next);
+            }}
+            aria-label="下班小结的时间"
+          />
+          <Switch
+            label="下班小结"
+            checked={wrapSettings.enabled}
+            onChange={(enabled) => {
+              const next = { ...wrapSettings, enabled };
+              saveWrapSettings(next);
+              setWrapSettings(next);
+            }}
+          />
+        </div>
+        <div className="flex items-center gap-3 px-3 py-2.5">
+          <div className="min-w-0 flex-1">
+            <div className="text-sm text-fg">看你打开的软件搭话</div>
+            <div className="text-xs text-fg-muted">打开 VS Code 叫代码员、打开 Word 叫笔杆子、在看 Jira 帮你理单子……每类一天最多一次</div>
+          </div>
+          <Switch
+            label="看你打开的软件搭话"
+            checked={hintsOn}
+            onChange={(on) => {
+              setAppHintsEnabled(on);
+              setHintsOn(on);
+            }}
+          />
+        </div>
+      </div>
+
       {!activityEnabled && mode !== "off" && (
         <Notice tone="warning">需要先打开上面的「本地活动观察」，主动提议才有依据。</Notice>
       )}

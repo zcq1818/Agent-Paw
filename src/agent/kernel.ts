@@ -11,6 +11,7 @@ import { getHandoffTools } from "./handoff";
 import { runWithToolScope } from "./tools";
 import { getFlowTools } from "./uiFlow";
 import { getMcpTools, mcpPromptSection } from "./mcpServers";
+import { getDocumentTools } from "./documents";
 import { usePetStore } from "../store/pet";
 import { formatInterjection, hasInterjections, takeInterjections } from "./interjections";
 import { personalityStore } from "./personality";
@@ -721,6 +722,7 @@ export function getTools(): Tool[] {
     tools.push(...getTimelineTools());
   }
   tools.push(...getAutomationTools());
+  tools.push(...getDocumentTools());
   tools.push(...getSkillLibraryTools());
   tools.push(...getMcpTools());
   return tools;
