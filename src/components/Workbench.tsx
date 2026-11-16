@@ -285,7 +285,7 @@ function Sidebar({
           <div className="text-sm font-semibold leading-tight">Paw 工作台</div>
           <div className="flex items-center gap-1.5 truncate text-xs text-sidebar-muted">
             <span className={`h-1.5 w-1.5 rounded-full ${isStreaming ? "bg-accent" : "bg-primary"}`} aria-hidden="true" />
-            {activeBot?.name || "皮卡丘"}
+            {activeBot?.name || "Paw"}
             {isStreaming ? " · 回复中" : ""}
           </div>
         </div>

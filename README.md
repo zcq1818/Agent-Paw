@@ -1,18 +1,86 @@
-# Paw 桌面宠物助手
+<p align="center">
+  <img src="public/models/pets/thumbs/fox.png" width="96" alt="Paw">
+</p>
 
-一个基于 Tauri v2 + React + Vite 的 Windows 桌面宠物 AI 助手。
+<h1 align="center">Paw · 会干活的 AI 桌面宠物</h1>
 
-## 功能
+<p align="center">
+  一只住在你桌面角落的小家伙：能陪你聊天，也能帮你读文件、写小结、开团队会、操作电脑。<br>
+  开源、免费，数据全部留在你自己的电脑上。
+</p>
 
-- 桌面宠物窗口：可拖拽、自主走动、气泡播报、右键菜单、迷你聊天
-- 工作台窗口：流式聊天（Markdown）、多会话、团队（多 Bot）、房间协作、总管（专家委派）、记忆、Skills、任务、活动、日志、设置
-- 工具调用：网页搜索、天气、时间、计算、待办、日程、快捷命令、剪贴板、打开应用/网页、系统动作、图片分析
-- 本地记忆：IndexedDB 存储，自动提取 + 关键词/向量检索
-- 自定义技能：可创建、导入导出 SKILL.md、启用/禁用
-- 本机 Claude Code：可把任务下发给本地 `claude` CLI（复用本机登录态）
-- 托盘控制：显示、隐藏、退出
+<p align="center">
+  <a href="https://github.com/zcq1818/Agent-Paw/releases/latest"><b>⬇️ 下载 Windows 版</b></a> ·
+  <a href="#常见问题">常见问题</a> ·
+  <a href="#开发者指南">参与开发</a>
+</p>
 
-## 开发
+<p align="center">
+  <img src="public/models/pets/thumbs/fox.png" width="72" alt="小狐狸">
+  <img src="public/models/pets/thumbs/cat.png" width="72" alt="小猫">
+  <img src="public/models/pets/thumbs/dino.png" width="72" alt="小恐龙">
+  <img src="public/models/pets/thumbs/robot.png" width="72" alt="机器人">
+  <img src="public/models/pets/thumbs/penguin.png" width="72" alt="小企鹅">
+</p>
+
+## 它能做什么
+
+**一只有性格的桌宠**
+- 5 种 3D 形态（小狐狸、小猫、小恐龙、机器人、小企鹅），会走动、打盹、伸懒腰、跳舞，还会躲着你的鼠标
+- 单击互动，双击聊天，拖到哪儿待在哪儿；可以设置活动范围、大小、透明度和免打扰时间
+- 陪你专注：番茄钟专注会让它成长升级，解锁更长的专注时长
+
+**把活儿丢给它**
+- **拖文件给它**：Word、Excel、PPT、PDF、图片、代码都能读（PDF 和图片用 Windows 自带的离线文字识别），读完问你要总结、翻译还是交给谁处理
+- **下班小结**：每天傍晚根据你今天用过的软件、完成的待办和专注时间写一份小结，可以直接发到 Slack 或 Jira
+- **看你在用什么软件**：打开 Jira、Slack、代码编辑器、Office 时，适时问一句要不要帮忙（可以关掉）
+- **操作电脑**：打开应用和网页、运行命令、读写文件、点击和输入——每一步动手前都会先问你
+
+**一支 AI 小团队**
+- 自己建团队成员：起名字、写人设、选形象、定权限，每个成员有自己的对话和记忆
+- **房间**：把几个成员拉进一个房间讨论同一个问题，用 @名字 点谁谁回答，不 @ 就大家轮流发言
+- **团队上桌面**：讨论时成员会出现在桌宠旁边，轮到谁谁冒泡
+- **总管**：把一个任务同时交给多个模型（也可以交给本机的 Claude Code），让它们各自完成或互相挑错，再汇总
+
+**顺手的小工具**
+- `Alt + Space` 快速启动器：拼音、首字母都能搜应用
+- 记忆：自动记住你的偏好和重要的事，越用越懂你
+- 技能（SKILL.md）和 MCP 连接器：一键登录 Slack、Jira、Notion、Linear、GitHub 等官方服务
+- 待办、日程、今日新闻、剪贴板助手、屏幕理解
+
+## 下载安装
+
+1. 到 [Releases](https://github.com/zcq1818/Agent-Paw/releases/latest) 下载 `Paw_x.y.z_x64-setup.exe`
+2. 双击安装，可以自己选安装位置（比如 `D:\Paw`）
+3. 第一次打开后，右键桌宠 → **设置 → 模型**，填上你的模型服务：任何兼容 OpenAI 接口的服务都可以（填 Base URL、API Key 和模型名）
+
+> 安装包暂时没有代码签名，Windows 可能会提示"Windows 已保护你的电脑"。点 **更多信息 → 仍要运行** 即可。源码完全公开，可以自己审查或自己打包。
+
+**系统要求**：Windows 10 / 11（64 位）。
+
+**更新**：Paw 会自动检查新版本，有更新时桌宠会问你，点一下就装好；也可以在 **设置 → 关于** 手动检查。
+
+## 隐私与数据
+
+- 聊天、记忆、设置、活动记录**全部保存在安装目录下的 `data` 文件夹**，不会上传到任何服务器。整个安装目录拷走，数据就跟着走
+- 你的对话只会发给你自己在设置里填的模型服务商
+- "看你在用什么软件"和活动时间线只在本机统计，可以随时关闭或清空
+- 操作电脑、写文件、运行命令前都会弹确认；连接器（Slack、Jira 等）走官方 OAuth 登录，Paw 不会接触你的账号密码
+- 卸载时程序会被删掉，`data` 文件夹会保留；不想要了手动删掉即可
+
+## 常见问题
+
+**需要付费吗？** Paw 本身免费开源（MIT）。模型调用按你自己选的服务商计费，很多服务商有免费额度。
+
+**支持 macOS / Linux 吗？** 目前只做了 Windows。读取 Office 文档、文字识别、操作电脑这些功能依赖 Windows 系统能力。
+
+**杀毒软件报毒怎么办？** 没签名的新程序偶尔会被误报。可以从源码自己打包，或者在 Issues 里反馈。
+
+**遇到问题或者有想法？** 欢迎到 [Issues](https://github.com/zcq1818/Agent-Paw/issues) 提。
+
+## 开发者指南
+
+### 本地运行
 
 ```bash
 npm install
@@ -20,13 +88,13 @@ npm run dev          # 仅前端，浏览器预览：/ 为宠物，/?window=main
 npm run tauri:dev    # 完整桌面端
 ```
 
-## 打包
+### 打包
 
 ```bash
 npm run tauri:build
 ```
 
-## 项目结构
+### 项目结构
 
 ```
 ├── src/                      前端（React 19 + zustand + Tailwind）
@@ -64,12 +132,12 @@ npm run tauri:build
 │   └── tauri.conf.json       两个窗口：pet（透明置顶）与 main（工作台，默认隐藏）
 ├── skills/                   示例 SKILL.md，可在 Skills 页导入
 ├── tools/pets/build_pets.py  用 Blender 生成带骨骼和动作的桌宠模型
-└── public/models/            pet.glb（3D 皮卡丘）、pets/*.glb（带骨骼的桌宠形态）
+└── public/models/pets/       *.glb（带骨骼的桌宠形态）与 thumbs/ 头像图
 ```
 
-### 两个窗口的状态
+### 多个窗口的状态
 
-`pet` 与 `main` 是两个独立的 WebView，各有一份 zustand 状态，但共用 localStorage。
+`pet`、`main`、`launcher`、`squad` 是独立的 WebView，各有一份 zustand 状态，但共用 localStorage。
 写入方保存到 localStorage，另一个窗口通过 `storage` 事件重新载入（见 `store/windowSync.ts`、
 `store/bots.ts`、`store/theme.ts`）。新增需要跨窗口共享的状态时，记得接入同步。
 
@@ -93,9 +161,21 @@ WebView 里直接 `fetch` 不带 CORS 头的站点会被拦截。搜索、新闻
 走 `tauri-plugin-http`；新增来源时要同时在 `src-tauri/capabilities/default.json` 的
 `http:default` 白名单里加上域名。
 
-## 说明
+### 环境说明
 
 - 默认面向 Windows 10/11
 - 需要 Rust 和 Visual Studio C++ Build Tools（`build-with-msvc.ps1` 可自动配置 MSVC 环境）
 - 可在设置中配置 OpenAI 兼容接口、API Key、Base URL 和模型名
 - 依赖用 npm 管理（`package-lock.json`）
+
+### 发布新版本（维护者）
+
+1. 改 `src-tauri/tauri.conf.json`、`package.json`、`src-tauri/Cargo.toml` 里的版本号，更新说明写在 `release-notes/vX.Y.Z.md`
+2. `npm run tauri:build`：本机有签名私钥（默认 `~/.tauri/paw-updater.key`，**绝不提交**）时会同时生成自动更新用的签名
+3. `npm run release`：生成 `latest.json` 并列出要上传的文件；确认无误后 `npm run release -- --publish` 用 `gh` 创建 GitHub Release
+
+已安装的 Paw 会从 `releases/latest/download/latest.json` 发现新版本，用 `tauri.conf.json` 里的公钥校验签名后安装。
+
+## 许可证
+
+[MIT](LICENSE)

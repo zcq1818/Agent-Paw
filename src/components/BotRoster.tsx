@@ -20,13 +20,6 @@ interface BotRosterProps {
   onClose: () => void;
 }
 
-const PET_SKIN_OPTIONS: { value: PetSkin; label: string }[] = [
-  { value: "yellow", label: "黄" },
-  { value: "blue", label: "蓝" },
-  { value: "pink", label: "粉" },
-  { value: "green", label: "绿" },
-];
-
 const LEVEL_LABEL: Record<ApprovalLevel, string> = {
   ask: "每次询问",
   edits: "允许编辑",
@@ -462,18 +455,6 @@ export function BotRoster({ onClose }: BotRosterProps) {
                               ))}
                               <option value="">仅 emoji</option>
                             </select>
-                            <select
-                              className="input"
-                              value={newBot.petSkin}
-                              title="形象配色"
-                              onChange={(event) => setNewBot({ ...newBot, petSkin: event.target.value as PetSkin })}
-                            >
-                              {PET_SKIN_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
                           </div>
                         </label>
                         <label className={labelClass}>
@@ -612,18 +593,6 @@ export function BotRoster({ onClose }: BotRosterProps) {
                                 </option>
                               ))}
                               <option value="">仅 emoji</option>
-                            </select>
-                            <select
-                              className="input"
-                              value={selected.petSkin || "yellow"}
-                              title="形象配色"
-                              onChange={(event) => updateBot(selected.id, { petSkin: event.target.value as PetSkin })}
-                            >
-                              {PET_SKIN_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
                             </select>
                           </div>
                         </label>

@@ -95,7 +95,7 @@ export function ChatMessage({ message, isStreaming, isLast, onRetry, onContinue,
 
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex items-center gap-2 text-xs">
-          <span className="font-medium text-fg">{activeBot?.name || "皮卡丘"}</span>
+          <span className="font-medium text-fg">{activeBot?.name || "Paw"}</span>
           {timeLabel && !isStreaming && <span className="text-fg-muted">{timeLabel}</span>}
         </div>
 

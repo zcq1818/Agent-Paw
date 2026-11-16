@@ -46,7 +46,7 @@ function getVoices(): SpeechSynthesisVoice[] {
 const ttsTools: Tool[] = [
   {
     name: "speak",
-    description: "让皮卡丘说话（语音合成）",
+    description: "让桌宠说话（语音合成）",
     parameters: {
       type: "object",
       properties: {

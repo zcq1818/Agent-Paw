@@ -21,7 +21,7 @@ export default defineConfig(async () => ({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes("/src/components/Pikachu3D") || id.includes("three/examples/jsm/loaders/GLTFLoader")) return "pet-3d";
+          if (id.includes("/src/components/RiggedPet3D") || id.includes("three/examples/jsm/loaders/GLTFLoader")) return "pet-3d";
           if (id.includes("node_modules")) {
             if (id.includes("three")) return "vendor-three";
             if (id.includes("react-markdown") || id.includes("remark-") || id.includes("micromark") || id.includes("mdast") || id.includes("hast") || id.includes("unified")) {

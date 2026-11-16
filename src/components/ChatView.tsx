@@ -271,7 +271,7 @@ export function ChatView({ onOpenSidebar, onOpenSettings }: ChatViewProps) {
             <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
               {activeBot ? <BotAvatar bot={activeBot} size={48} /> : <Zap size={28} className="text-primary" />}
             </div>
-            <h2 className="mt-4 text-xl font-semibold text-fg">你好，我是{activeBot?.name || "皮卡丘"}</h2>
+            <h2 className="mt-4 text-xl font-semibold text-fg">你好，我是{activeBot?.name || "Paw"}</h2>
             <p className="mt-1.5 text-sm text-fg-muted">可以聊天、查资料、管理待办，或者帮你打开电脑上的应用。</p>
             <div className="mt-7 grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2">
               {SUGGESTIONS.map((item) => (
@@ -348,7 +348,7 @@ export function ChatView({ onOpenSidebar, onOpenSettings }: ChatViewProps) {
                   ? currentToolRuns.some((run) => run.status === "pending")
                     ? "等你在上面的卡片里确认（允许 / 拒绝）…"
                     : `${runningToolName ? `正在${toolActionLabel(runningToolName)}` : "正在回复"}，可以继续输入补充…`
-                  : `给${activeBot?.name || "皮卡丘"}发消息，Enter 发送，Shift + Enter 换行`
+                  : `给${activeBot?.name || "Paw"}发消息，Enter 发送，Shift + Enter 换行`
               }
               rows={1}
               className="chat-composer-input block max-h-[200px] min-w-0 flex-1 resize-none border-0 bg-transparent py-1.5 text-sm leading-relaxed text-fg outline-none placeholder:text-fg-muted"

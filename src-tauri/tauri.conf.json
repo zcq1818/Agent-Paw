@@ -83,6 +83,18 @@
     "icon": [
       "icons/icon.png",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY2OTQ5OTgxNjAzNDYyRDAKUldUUVlqUmdnWm1VWmpFV2JiZFZRamdSOFVIRG9KclZoSkM4YzloVEdBQ3dJaGFhSnFNa2grUnYK",
+      "endpoints": [
+        "https://github.com/zcq1818/Agent-Paw/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

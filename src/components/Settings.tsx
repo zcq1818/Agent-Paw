@@ -9,6 +9,7 @@ import {
   Cpu,
   Eye,
   EyeOff,
+  Info,
   Keyboard,
   Loader2,
   Menu,
@@ -55,13 +56,14 @@ import {
   type ModelSettings,
 } from "../agent/modelProfiles";
 import { getActiveBot, useBotStore } from "../store/bots";
-import { usePetStore, SKIN_COLORS, type InteractionFrequency, type PetAvatar, type PetSkin, type RoamScope } from "../store/pet";
+import { usePetStore, DEFAULT_PET_NAME, type InteractionFrequency, type PetAvatar, type PetSkin, type RoamScope } from "../store/pet";
 import { THEME_OPTIONS, type AppTheme, useThemeClass, useThemeStore } from "../store/theme";
 import { useActivityStore } from "../store/activity";
 import { HotkeySettingsCard } from "./HotkeySettings";
 import { CustomSkillsSettings } from "./CustomSkillsSettings";
 import { AlwaysAllowList, InitiativeCard, TimelineOptions } from "./AssistantSettings";
 import { McpServersCard } from "./McpSettings";
+import { AboutSettingsCard } from "./AboutSettings";
 import { useAvatarOptions } from "../store/petAvatars";
 import type { ComputerControlMode } from "../agent/computer";
 import { CLAUDE_MODEL_OPTIONS, CODEBUDDY_MODEL_OPTIONS, LOCAL_AGENT_LABELS, localAgentOf } from "../agent/claudeLocal";
@@ -74,7 +76,7 @@ interface SettingsProps {
   onOpenSidebar?: () => void;
 }
 
-type SettingsSection = "model" | "features" | "mcp" | "pet" | "appearance" | "shortcuts";
+type SettingsSection = "model" | "features" | "mcp" | "pet" | "appearance" | "shortcuts" | "about";
 
 const SECTIONS: Array<{ id: SettingsSection; label: string; icon: React.ReactNode }> = [
   { id: "model", label: "模型", icon: <Cpu size={15} /> },
@@ -83,14 +85,9 @@ const SECTIONS: Array<{ id: SettingsSection; label: string; icon: React.ReactNod
   { id: "pet", label: "桌宠", icon: <Bot size={15} /> },
   { id: "appearance", label: "外观", icon: <Palette size={15} /> },
   { id: "shortcuts", label: "快捷键", icon: <Keyboard size={15} /> },
+  { id: "about", label: "关于", icon: <Info size={15} /> },
 ];
 
-const SKIN_OPTIONS: { value: PetSkin; label: string }[] = [
-  { value: "yellow", label: "皮卡丘" },
-  { value: "blue", label: "蓝色" },
-  { value: "pink", label: "粉色" },
-  { value: "green", label: "绿色" },
-];
 
 const FREQUENCY_OPTIONS: { value: InteractionFrequency; label: string }[] = [
   { value: "rare", label: "较少" },
@@ -361,7 +358,7 @@ export function Settings({ onBack, onOpenSidebar, initialSection }: SettingsProp
   // （之前在桌宠页点保存，会把模型表单也存一遍，编辑中的“新模型”会被重复创建）。
   const saveAll = () => {
     saveConfig({ enableMemory, enablePersonality, enableSecurity, enableMultimodal, computerControl });
-    setName(petNameInput.trim() || "皮卡丘");
+    setName(petNameInput.trim() || DEFAULT_PET_NAME);
     setSkin(skin);
     setAvatar(avatar);
     setAutoAction(autoAction);
@@ -808,26 +805,8 @@ export function Settings({ onBack, onOpenSidebar, initialSection }: SettingsProp
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="名字">
                     <input className="input" value={petNameInput} onChange={(event) => setPetNameInput(event.target.value)}
-                      onBlur={() => setName(petNameInput.trim() || "皮卡丘")}
+                      onBlur={() => setName(petNameInput.trim() || DEFAULT_PET_NAME)}
                     />
-                  </Field>
-                  <Field label="配色" hint="皮卡丘系形态生效。">
-                    <div className="flex flex-wrap gap-2">
-                      {SKIN_OPTIONS.map((option) => (
-                        <button
-                          key={option.value}
-                          type="button"
-                          onClick={() => live(setSkinLocal, setSkin)(option.value)}
-                          aria-pressed={skin === option.value}
-                          className={`flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm transition ${
-                            skin === option.value ? "border-primary bg-primary/10 text-fg" : "border-line text-fg-muted hover:text-fg"
-                          }`}
-                        >
-                          <span className="h-3.5 w-3.5 rounded-full border border-line" style={{ backgroundColor: SKIN_COLORS[option.value].body }} />
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
                   </Field>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -911,6 +890,7 @@ export function Settings({ onBack, onOpenSidebar, initialSection }: SettingsProp
 
           {activeSection === "mcp" && <McpServersCard />}
           {activeSection === "shortcuts" && <HotkeySettingsCard />}
+          {activeSection === "about" && <AboutSettingsCard />}
         </div>
       </div>
 

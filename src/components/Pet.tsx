@@ -29,7 +29,8 @@ import { HOTKEY_EVENT } from "../store/shortcut";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { describePaths, type DroppedFile } from "../agent/documents";
 import { focusStreak, muteHint, useAppHints, useDailyWrap, useGrowthStore, buildDailyWrap, wrapPrompt, todayFocusMinutes, unlocksAt, dayKey, type AppHint, type DailyWrap } from "../agent/petLife";
-import { DropCard, FocusBadge, GrowthMenuHeader, HintCard, WrapCard, type DropChoice } from "./PetCards";
+import { DropCard, FocusBadge, GrowthMenuHeader, HintCard, UpdateCard, WrapCard, type DropChoice } from "./PetCards";
+import { installUpdate, skipVersion, useUpdateCheck, type UpdateInfo } from "../agent/updater";
 import { useBotStore, type BotRole } from "../store/bots";
 import { loadConfig } from "../agent/kernel";
 
@@ -80,7 +81,6 @@ function saveChatSize() {
 type ResizeCorner = "nw" | "se";
 const SPRITE_SIZE = 128;
 const EDGE_PADDING = 14;
-const Pikachu3D = lazy(() => import("./Pikachu3D").then((module) => ({ default: module.Pikachu3D })));
 const MarkdownContent = lazy(() => import("./MarkdownContent").then((module) => ({ default: module.MarkdownContent })));
 const RiggedPet3D = lazy(() => import("./RiggedPet3D").then((module) => ({ default: module.RiggedPet3D })));
 
@@ -309,8 +309,11 @@ export function Pet() {
   const focus = useGrowthStore((state) => state.focus);
   const growthTotal = useGrowthStore((state) => state.totalFocusMin);
   const growthDays = useGrowthStore((state) => state.days);
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null);
+  const [updateError, setUpdateError] = useState("");
   const cardOpenRef = useRef(false);
-  cardOpenRef.current = Boolean(dropFiles || wrap || hint);
+  cardOpenRef.current = Boolean(dropFiles || wrap || hint || update);
   const focusRef = useRef(focus);
   focusRef.current = focus;
 
@@ -1021,6 +1024,25 @@ export function Pet() {
 
   const closeHint = useCallback(() => setHint(null), []);
 
+  // 新版本：后台检查，有就弹卡片
+  useUpdateCheck((info) => {
+    setUpdateError("");
+    setUpdateProgress(null);
+    setUpdate(info);
+  });
+
+  const runUpdate = useCallback(async () => {
+    if (!update) return;
+    setUpdateError("");
+    setUpdateProgress(0);
+    try {
+      await installUpdate(update, setUpdateProgress);
+    } catch (error) {
+      setUpdateProgress(null);
+      setUpdateError(`更新失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, [update]);
+
   const acceptHint = useCallback(async () => {
     const current = hint;
     if (!current) return;
@@ -1524,7 +1546,22 @@ export function Pet() {
         />
       )}
 
-      {hint && !wrap && !dropFiles && !showMiniChat && (
+      {update && !wrap && !dropFiles && !showMiniChat && (
+        <UpdateCard
+          version={update.version}
+          notes={update.notes}
+          progress={updateProgress}
+          error={updateError}
+          onInstall={() => void runUpdate()}
+          onSkip={() => {
+            skipVersion(update.version);
+            setUpdate(null);
+          }}
+          onClose={() => updateProgress === null && setUpdate(null)}
+        />
+      )}
+
+      {hint && !update && !wrap && !dropFiles && !showMiniChat && (
         <HintCard
           hint={hint}
           onAccept={() => void acceptHint()}
@@ -1536,7 +1573,7 @@ export function Pet() {
         />
       )}
 
-      {focus && !showMiniChat && !dropFiles && !wrap && !hint && !offer && (
+      {focus && !showMiniChat && !dropFiles && !wrap && !hint && !update && !offer && (
         <FocusBadge endsAt={focus.endsAt} minutes={focus.minutes} onCancel={cancelFocus} />
       )}
 
@@ -1732,15 +1769,14 @@ export function Pet() {
         title="单击互动，拖拽移动，双击聊天"
         style={{ opacity: petOpacity }}
       >
-        {avatarInfo.kind === "rigged" && avatarInfo.model ? (
-          <Suspense fallback={<div className="h-28 w-28 rounded-full bg-primary/30 shadow-lg" />}>
-            <RiggedPet3D model={avatarInfo.model} state={petState} facing={facing} size={petSize || SPRITE_SIZE} />
-          </Suspense>
-        ) : (
-          <Suspense fallback={<div className="h-28 w-28 rounded-full bg-primary/30 shadow-lg" />}>
-            <Pikachu3D state={petState} facing={facing} size={petSize || SPRITE_SIZE} />
-          </Suspense>
-        )}
+        <Suspense fallback={<div className="h-28 w-28 rounded-full bg-primary/30 shadow-lg" />}>
+          <RiggedPet3D
+            model={avatarInfo.model || BUILTIN_AVATARS[0].model!}
+            state={petState}
+            facing={facing}
+            size={petSize || SPRITE_SIZE}
+          />
+        </Suspense>
 
         {statusText && (
           <div className="absolute -top-8 left-1/2 -translate-x-1/2 rounded-full bg-surface/90 px-2.5 py-0.5 text-xs text-fg-muted shadow-sm backdrop-blur pointer-events-none">

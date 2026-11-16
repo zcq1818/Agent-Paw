@@ -50,7 +50,7 @@ const TIPS: Interaction[] = [
 const NEWS: Interaction[] = [
   { type: "news", message: "今日公告：你已经很棒了，继续稳稳推进。", emoji: "📣" },
   { type: "news", message: "桌面观察报告：适合保持轻松但专注。", emoji: "🔎" },
-  { type: "news", message: "系统提示：皮卡丘已就位。", emoji: "📡" },
+  { type: "news", message: "系统提示：桌宠已就位。", emoji: "📡" },
 ];
 
 function pick<T>(items: T[]): T {

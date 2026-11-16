@@ -6,7 +6,7 @@ import { useBotStore, type BotRole } from "../store/bots";
 import { BotAvatar } from "./BotAvatar";
 import { formatDur } from "../agent/timeline";
 
-/** 桌宠窗口里的几张小卡片：拖文件、下班小结、软件提示、专注倒计时。 */
+/** 桌宠窗口里的几张小卡片：拖文件、下班小结、软件提示、专注倒计时、新版本。 */
 
 function CardShell({ title, tag, onClose, children }: { title: ReactNode; tag?: ReactNode; onClose: () => void; children: ReactNode }) {
   return (
@@ -299,5 +299,64 @@ export function GrowthMenuHeader({
         </div>
       )}
     </div>
+  );
+}
+
+// ───────────────────────── 新版本 ─────────────────────────
+
+export function UpdateCard({
+  version,
+  notes,
+  progress,
+  error,
+  onInstall,
+  onSkip,
+  onClose,
+}: {
+  version: string;
+  notes: string;
+  /** null = 还没开始下载 */
+  progress: number | null;
+  error?: string;
+  onInstall: () => void;
+  onSkip: () => void;
+  onClose: () => void;
+}) {
+  const firstLines = notes
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(#+|[-*]|\d+\.)\s*/, "").trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  return (
+    <CardShell title={`Paw 有新版本 ${version}`} tag={progress === null ? "更新" : `${progress}%`} onClose={onClose}>
+      {firstLines.length > 0 && (
+        <ul className="mb-2 space-y-0.5 text-xs leading-relaxed text-fg-muted">
+          {firstLines.map((line) => (
+            <li key={line} className="truncate">
+              · {line}
+            </li>
+          ))}
+        </ul>
+      )}
+      {progress !== null ? (
+        <div className="space-y-1.5">
+          <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
+            <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.max(4, progress)}%` }} />
+          </div>
+          <div className="text-[11px] text-fg-muted">{progress >= 100 ? "装好了，马上重启…" : "正在下载，聊天和记忆都不会动"}</div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2">
+          <ActionButton primary onClick={onInstall}>
+            更新并重启
+          </ActionButton>
+          <ActionButton onClick={onClose}>以后再说</ActionButton>
+          <button type="button" onClick={onSkip} className="ml-auto text-[10px] text-fg-muted hover:text-fg">
+            跳过这个版本
+          </button>
+        </div>
+      )}
+      {error && <div className="mt-1.5 text-[11px] text-red-500">{error}</div>}
+    </CardShell>
   );
 }

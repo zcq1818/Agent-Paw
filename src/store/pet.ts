@@ -9,11 +9,11 @@ export type PetAvatar =
   | "dino"
   | "robot"
   | "penguin"
-  | "toon_pikachu"
   | `custom:${string}`;
 
-/** 像素形态已移除：旧配置里的像素形态换成对应的 3D 形态。 */
+/** 已移除的形态（像素形态、旧的无骨骼模型）：旧配置里换成对应的 3D 形态。 */
 const LEGACY_AVATARS: Record<string, PetAvatar> = {
+  toon_pikachu: "fox",
   pixel_pikachu: "fox",
   pixel_cat: "cat",
   pixel_dog: "fox",
@@ -23,6 +23,9 @@ export function migrateAvatar(value: unknown): PetAvatar | undefined {
   if (typeof value !== "string" || !value) return undefined;
   return LEGACY_AVATARS[value] || (value as PetAvatar);
 }
+/** 默认名字（和应用同名）。 */
+export const DEFAULT_PET_NAME = "Paw";
+
 export type TimeOfDay = "morning" | "afternoon" | "evening" | "night";
 export type InteractionFrequency = "rare" | "normal" | "frequent";
 export type RoamScope = "full" | "nearby" | "corner";
@@ -140,7 +143,7 @@ const defaultConfig = loadPetConfig();
 
 export const usePetStore = create<PetState>((set, get) => ({
   emotion: "idle",
-  name: defaultConfig.name || "皮卡丘",
+  name: defaultConfig.name || DEFAULT_PET_NAME,
   skin: defaultConfig.skin || "yellow",
   avatar: migrateAvatar(defaultConfig.avatar) || "fox",
   autoAction: defaultConfig.autoAction ?? true,

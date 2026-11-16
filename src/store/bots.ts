@@ -45,7 +45,7 @@ export interface BotProfile {
   avatar: string;
   /** 复用桌宠的真实形象；留空则回落到 emoji 头像。 */
   petAvatar?: PetAvatar;
-  /** 形象配色（皮卡丘系生效）。 */
+  /** 形象配色（旧字段，目前的形态不使用）。 */
   petSkin?: PetSkin;
   role: BotRole;
   tagline: string;
@@ -112,7 +112,7 @@ export const ROLE_PRESETS: Array<{
 }> = [
   {
     role: "chief",
-    name: "皮卡丘",
+    name: "Paw",
     avatar: "pikachu",
     petAvatar: "fox",
     petSkin: "yellow",
@@ -147,7 +147,7 @@ export const ROLE_PRESETS: Array<{
     role: "ops",
     name: "运营",
     avatar: "ops",
-    petAvatar: "toon_pikachu",
+    petAvatar: "penguin",
     petSkin: "pink",
     tagline: "待办、日程、提醒与日常事务",
     instructions: "你是事务助手。优先使用待办与日程工具，输出可执行的清单。",
@@ -229,7 +229,7 @@ export const ROLE_PRESETS: Array<{
     role: "designer",
     name: "设计师",
     avatar: "designer",
-    petAvatar: "toon_pikachu",
+    petAvatar: "cat",
     petSkin: "pink",
     tagline: "界面、配色、排版建议",
     instructions:

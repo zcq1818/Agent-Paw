@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useBotStore } from "../store/bots";
 import { useChatStore } from "../store/chat";
 import { personalityStore } from "./personality";
-import { usePetStore } from "../store/pet";
+import { DEFAULT_PET_NAME, usePetStore } from "../store/pet";
 import { DEFAULT_BOT_ID } from "./scope";
 
 /**
@@ -28,7 +28,7 @@ export function useBotScopeSync() {
     const previous = lastPetName.current;
     lastPetName.current = name;
     if (!bot || bot.name === name) return;
-    if (bot.name === "皮卡丘" || bot.name === previous) useBotStore.getState().updateBot(DEFAULT_BOT_ID, { name });
+    if (bot.name === "皮卡丘" || bot.name === DEFAULT_PET_NAME || bot.name === previous) useBotStore.getState().updateBot(DEFAULT_BOT_ID, { name });
   }, [petName]);
 }
 
