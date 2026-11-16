@@ -79,7 +79,7 @@ ConvertTo-Json -InputObject @($out) -Compress -Depth 3
 "#;
 
 fn cache_file(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::paths::data_dir(app)?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("launcher_apps.json"))
 }

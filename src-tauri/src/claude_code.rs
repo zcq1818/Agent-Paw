@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 struct McpServer {
     port: u16,
@@ -277,9 +277,7 @@ pub async fn check_codebuddy(path: Option<String>) -> Result<LocalAgentStatus, S
 
 fn work_dir(app: &AppHandle) -> PathBuf {
     // 固定的空工作目录：不会加载某个项目里的 CLAUDE.md、钩子之类
-    let dir = app
-        .path()
-        .app_data_dir()
+    let dir = crate::paths::data_dir(app)
         .unwrap_or_else(|_| std::env::temp_dir())
         .join("claude-work");
     let _ = std::fs::create_dir_all(&dir);

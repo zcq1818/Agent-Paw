@@ -17,7 +17,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 const TICK: Duration = Duration::from_secs(2);
 const AWAY_AFTER_MS: i64 = 5 * 60_000;
@@ -652,7 +652,7 @@ fn purge_old(rec: &mut Recorder) {
 
 /// 启动后台采样线程（应用启动时调用一次）。
 pub fn start(app: &AppHandle) {
-    if let Ok(dir) = app.path().app_data_dir() {
+    if let Ok(dir) = crate::paths::data_dir(app) {
         state().lock().unwrap().dir = Some(dir.join("timeline"));
     }
     let handle = app.clone();

@@ -12,6 +12,7 @@ mod mcp_client;
 mod oauth_callback;
 mod skills;
 mod ocr;
+mod paths;
 mod timeline;
 mod tray;
 
@@ -32,12 +33,16 @@ fn toggle_main_window(app: tauri::AppHandle) {
             let _ = window.set_focus();
         }
     } else {
-        let _ = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
+        let mut builder = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
             .title("Paw - 工作台")
             .inner_size(1040.0, 720.0)
             .min_inner_size(420.0, 520.0)
-            .resizable(true)
-            .build();
+            .resizable(true);
+        // 和其他窗口用同一份网页存储，否则会像换了个人
+        if let Some(dir) = paths::webview_dir() {
+            builder = builder.data_directory(dir);
+        }
+        let _ = builder.build();
     }
 }
 
@@ -408,6 +413,15 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
+            // 正式版数据放在安装目录下的 data 里：先把旧数据搬过来，再建窗口
+            paths::migrate_from_appdata(app.handle());
+            for config in app.config().app.windows.clone() {
+                let mut builder = WebviewWindowBuilder::from_config(app.handle(), &config)?;
+                if let Some(dir) = paths::webview_dir() {
+                    builder = builder.data_directory(dir);
+                }
+                builder.build()?;
+            }
             tray::create_tray(app)?;
             timeline::start(app.handle());
             Ok(())

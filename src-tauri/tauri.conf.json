@@ -14,6 +14,7 @@
     "windows": [
       {
         "label": "pet",
+        "create": false,
         "title": "Paw",
         "width": 340,
         "height": 340,
@@ -29,6 +30,7 @@
       },
       {
         "label": "main",
+        "create": false,
         "title": "Paw - 工作台",
         "width": 1040,
         "height": 720,
@@ -42,6 +44,7 @@
       },
       {
         "label": "squad",
+        "create": false,
         "title": "Paw 团队",
         "width": 520,
         "height": 210,
@@ -56,6 +59,7 @@
       },
       {
         "label": "launcher",
+        "create": false,
         "title": "Paw 启动器",
         "width": 680,
         "height": 72,

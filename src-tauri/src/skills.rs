@@ -5,7 +5,7 @@
 
 use serde::Serialize;
 use std::path::{Component, Path, PathBuf};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 const MAX_SKILL_MD: u64 = 512 * 1024;
 const MAX_FILE: u64 = 2 * 1024 * 1024;
@@ -22,10 +22,10 @@ pub struct SkillFolder {
     modified: i64,
 }
 
-/// 桌宠自己的技能文件夹（%APPDATA%/com.paw.desktop/skills），没有就创建。
+/// 桌宠自己的技能文件夹（正式版在安装目录 data/skills，开发版在 %APPDATA%/com.paw.desktop/skills），没有就创建。
 #[tauri::command]
 pub fn skills_root(app: AppHandle) -> Result<String, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("skills");
+    let dir = crate::paths::data_dir(&app)?.join("skills");
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建技能文件夹失败：{e}"))?;
     Ok(dir.to_string_lossy().to_string())
 }
