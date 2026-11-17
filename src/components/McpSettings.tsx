@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, KeyRound, LogOut, Pencil, Plug, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Button, Card, Notice, Segmented, Switch } from "./ui";
+import { BrowserCard } from "./BrowserConnector";
 import {
   formatPairs,
   joinArgs,
@@ -42,10 +43,6 @@ const EXAMPLES: Example[] = [
   {
     label: "网页抓取",
     draft: { name: "网页抓取", transport: "stdio", command: "uvx", args: "mcp-server-fetch" },
-  },
-  {
-    label: "浏览器（Playwright）",
-    draft: { name: "浏览器", transport: "stdio", command: "npx", args: "-y @playwright/mcp@latest" },
   },
 ];
 
@@ -626,6 +623,11 @@ export function McpServersCard() {
         </div>
       }
     >
+      <div className="space-y-2">
+        <div className="text-sm font-medium text-fg">网页操作</div>
+        <BrowserCard />
+      </div>
+
       <div className="space-y-2">
         <div className="text-sm font-medium text-fg">常用服务</div>
         <p className="text-xs text-fg-muted">点“连接”，在浏览器里登录并同意，回来就能在聊天里用。</p>
