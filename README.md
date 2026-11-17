@@ -170,9 +170,10 @@ WebView 里直接 `fetch` 不带 CORS 头的站点会被拦截。搜索、新闻
 
 ### 发布新版本（维护者）
 
-1. 改 `src-tauri/tauri.conf.json`、`package.json`、`src-tauri/Cargo.toml` 里的版本号，更新说明写在 `release-notes/vX.Y.Z.md`，提交并推送
-2. 打标签并推送：`git tag vX.Y.Z && git push origin vX.Y.Z`。GitHub Actions（`.github/workflows/release.yml`）会在 Windows 机器上打包、签名，发布到 Releases，并附上 `latest.json`
-   - 标签和三处版本号对不上时会直接报错，不会发出去
+1. 改 `src-tauri/tauri.conf.json`、`package.json`、`src-tauri/Cargo.toml` 里的版本号，更新说明写在 `release-notes/vX.Y.Z.md`
+2. 提交并推送到 main。GitHub Actions（`.github/workflows/release.yml`）发现这个版本号还没发布过，就会在 Windows 机器上打包、签名，发布 `vX.Y.Z` 到 Releases，并附上 `latest.json`
+   - 版本号没变的推送不会打包，也不会发版
+   - 三处版本号对不上时会直接报错，不会发出去
    - 需要先在仓库 Settings → Secrets and variables → Actions 里添加 `TAURI_SIGNING_PRIVATE_KEY`（签名私钥的内容）
    - 想先试试能不能打包：在 Actions 页面手动运行 Release，只打包不发布，安装包在构建产物里下载
 

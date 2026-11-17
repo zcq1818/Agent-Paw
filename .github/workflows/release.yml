@@ -1,5 +1,7 @@
 # 自动打包发版
-# - 推送 vX.Y.Z 标签：在 GitHub 的 Windows 机器上打包、签名，发布到 Releases（含自动更新用的 latest.json）
+# - 推送到 main 时，如果 tauri.conf.json 里的版本号还没有发布过：自动打包、签名，发布 vX.Y.Z（含自动更新用的 latest.json）
+#   已经发布过的版本号会直接跳过，所以平时推代码不会发版；想发新版，改版本号推上来就行
+# - 推送 vX.Y.Z 标签：同样发布（备用方式）
 # - 在 Actions 页面手动运行：只打包，不发布，安装包作为构建产物下载，用来试跑
 #
 # 需要在仓库 Settings → Secrets and variables → Actions 里添加：
@@ -10,6 +12,10 @@ name: Release
 
 on:
   push:
+    branches: [main]
+    paths:
+      - src-tauri/tauri.conf.json
+      - .github/workflows/release.yml
     tags: ["v*"]
   workflow_dispatch:
 
@@ -17,7 +23,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
@@ -26,18 +32,49 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
+      - name: Decide what to do
+        id: meta
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          pkg=$(node -p "require('./package.json').version")
+          cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)
+          if [ "$version" != "$pkg" ] || [ "$version" != "$cargo" ]; then
+            echo "::error::版本号不一致：tauri.conf.json=$version package.json=$pkg Cargo.toml=$cargo"
+            exit 1
+          fi
+          tag="v$version"
+          mode=build
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            if [ "$GITHUB_REF_NAME" != "$tag" ]; then
+              echo "::error::标签 $GITHUB_REF_NAME 和版本号 $version 对不上，应该打 $tag"
+              exit 1
+            fi
+            mode=publish
+          elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+              mode=skip
+              echo "::notice::$tag 已经发布过，这次不打包。要发新版请先改版本号"
+            else
+              mode=publish
+            fi
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          notes="release-notes/$tag.md"
+          {
+            echo 'notes<<PAW_NOTES_EOF'
+            if [ -f "$notes" ]; then cat "$notes"; else echo "Paw $tag"; fi
+            echo
+            echo 'PAW_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+          echo "版本 $version → $mode"
 
       - name: Check signing key
+        if: steps.meta.outputs.mode != 'skip'
         shell: bash
         env:
           KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -47,49 +84,41 @@ jobs:
             exit 1
           fi
 
-      - name: Check version and read release notes
-        id: meta
-        shell: bash
-        run: |
-          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          pkg=$(node -p "require('./package.json').version")
-          cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)
-          if [ "$version" != "$pkg" ] || [ "$version" != "$cargo" ]; then
-            echo "::error::版本号不一致：tauri.conf.json=$version package.json=$pkg Cargo.toml=$cargo"
-            exit 1
-          fi
-          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "::error::标签 $GITHUB_REF_NAME 和版本号 $version 对不上，应该打 v$version"
-            exit 1
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          notes="release-notes/v$version.md"
-          {
-            echo 'notes<<PAW_NOTES_EOF'
-            if [ -f "$notes" ]; then cat "$notes"; else echo "Paw v$version"; fi
-            echo
-            echo 'PAW_NOTES_EOF'
-          } >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        if: steps.meta.outputs.mode != 'skip'
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.meta.outputs.mode != 'skip'
+
+      - uses: swatinem/rust-cache@v2
+        if: steps.meta.outputs.mode != 'skip'
+        with:
+          workspaces: src-tauri -> target
 
       - run: npm ci
+        if: steps.meta.outputs.mode != 'skip'
 
       - name: Build and publish release
-        if: github.ref_type == 'tag'
+        if: steps.meta.outputs.mode == 'publish'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: Paw ${{ github.ref_name }}
+          tagName: ${{ steps.meta.outputs.tag }}
+          releaseName: Paw ${{ steps.meta.outputs.tag }}
           releaseBody: ${{ steps.meta.outputs.notes }}
+          releaseCommitish: ${{ github.sha }}
           releaseDraft: false
           prerelease: false
-          includeUpdaterJson: true
+          uploadUpdaterJson: true
 
       - name: Build only (manual run)
-        if: github.ref_type != 'tag'
+        if: steps.meta.outputs.mode == 'build'
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -97,7 +126,7 @@ jobs:
         run: npm run tauri build
 
       - name: Upload installer (manual run)
-        if: github.ref_type != 'tag'
+        if: steps.meta.outputs.mode == 'build'
         uses: actions/upload-artifact@v4
         with:
           name: Paw-${{ steps.meta.outputs.version }}-windows
