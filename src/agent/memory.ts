@@ -69,6 +69,23 @@ const AUTO_EXTRACT_PROMPT = `你是一个记忆管理助手。请分析对话内
 
 如果没有值得记忆的内容，请返回空数组。`;
 
+const REMEMBER_CUE = /记住|记一下|别忘|remember/i;
+const SELF_CUE = /我|咱|\bmy\b|\bi\b|\bi'm\b|\bme\b/i;
+const PERSONAL_CUE =
+  /喜欢|讨厌|不爱|习惯|偏好|通常|一般|经常|每天|每周|总是|从不|不要|别再|以后|下次|叫我|我叫|我是|我在|我住|生日|家里|老婆|老公|对象|孩子|女儿|儿子|爸|妈|公司|工作|上班|负责|职位|项目|用的是|在用|过敏|prefer|like|hate|usually|always|never|work|live/i;
+
+/**
+ * 这一轮值不值得花一次模型调用去提炼记忆。
+ * 只有用户说了“记住…”，或者谈到自己的偏好、习惯、身份、家人、工作时才提炼；
+ * 普通提问、让它干活、闲聊都跳过，省掉每轮额外的一次调用。
+ */
+export function worthExtracting(userText: string): boolean {
+  const text = userText.trim();
+  if (text.length < 6) return false;
+  if (REMEMBER_CUE.test(text)) return true;
+  return SELF_CUE.test(text) && PERSONAL_CUE.test(text);
+}
+
 function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length || a.length === 0) return 0;
   let dot = 0;
@@ -469,7 +486,7 @@ class MemoryStore {
             { role: "user", content: prompt },
           ],
           temperature: 0.3,
-          max_tokens: 1000,
+          max_tokens: 500,
         }),
       });
 
@@ -484,6 +501,8 @@ class MemoryStore {
 
       const newMemories: Memory[] = [];
       const validTypes: MemoryType[] = ["preference", "fact", "habit", "important", "task"];
+      // 查重直接和已有记忆的向量比，不再为每条候选再做一次搜索（那会多调一次向量接口）
+      const known = await this.getAll();
       for (const raw of parsed.memories) {
         if (!raw || typeof raw.content !== "string" || !raw.content.trim()) continue;
         const importance = Math.max(0, Math.min(10, Number(raw.importance) || 5));
@@ -495,10 +514,9 @@ class MemoryStore {
           importance,
         };
         const candidateEmbedding = await this.getEmbedding(item.content);
-        const existing = await this.search(item.content, 5);
         const isDuplicate =
           candidateEmbedding !== undefined &&
-          existing.some((memory) => memory.embedding && cosineSimilarity(candidateEmbedding, memory.embedding) > 0.95);
+          known.some((memory) => memory.embedding && cosineSimilarity(candidateEmbedding, memory.embedding) > 0.95);
 
         if (isDuplicate) continue;
 
@@ -516,6 +534,7 @@ class MemoryStore {
               : undefined,
         });
         newMemories.push(saved);
+        known.push(saved);
       }
 
       return newMemories;

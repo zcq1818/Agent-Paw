@@ -1,5 +1,5 @@
 import { buildContext } from "./context";
-import { memoryStore } from "./memory";
+import { memoryStore, worthExtracting } from "./memory";
 import { getAllTools, todoStore, calendarStore } from "./tools";
 import { getMultimodalTools } from "./multimodal";
 import { computerControlPrompt, getComputerTools, type ComputerControlMode } from "./computer";
@@ -1115,14 +1115,12 @@ export async function streamChat(
     onChunk(note);
   }
 
-  if (config.enableMemory !== false && (fullText.length > 30 || userText.length > 8)) {
-    const conversation = request.messages
-      .slice(-5)
-      .map((message) => `${message.role}: ${message.content}`)
-      .join("\n");
-
+  // 自动记忆：只在用户谈到自己（偏好、习惯、身份……）或说“记住”时才额外调一次模型提炼，
+  // 而且只发这一轮的问答，不再每轮把最近 5 条消息重复发一遍。
+  if (config.enableMemory !== false && worthExtracting(userText)) {
+    const conversation = `user: ${userText.slice(0, 1500)}\nassistant: ${fullText.slice(0, 800)}`;
     setTimeout(() => {
-      memoryStore.extractAndSaveMemories(`${conversation}\nassistant: ${fullText}`).catch(() => {});
+      memoryStore.extractAndSaveMemories(conversation).catch(() => {});
     }, 0);
   }
 

@@ -187,7 +187,7 @@ function AppFlowsSection() {
                   <>
                     <input
                       type="time"
-                      className="input h-8 w-[92px] px-2 text-xs"
+                      className="input h-8 !w-[92px] shrink-0 !px-2 !py-0 text-xs"
                       value={times[flow.id] || "09:30"}
                       onChange={(event) => setTimes((current) => ({ ...current, [flow.id]: event.target.value }))}
                     />
@@ -270,7 +270,7 @@ export function InitiativeCard({ activityEnabled }: { activityEnabled: boolean }
           </div>
           <input
             type="time"
-            className="input h-8 w-[104px] py-0 text-xs"
+            className="input h-8 !w-[104px] shrink-0 !py-0 text-xs"
             value={wrapSettings.time}
             disabled={!wrapSettings.enabled}
             onChange={(event) => {
