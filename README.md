@@ -170,9 +170,13 @@ WebView 里直接 `fetch` 不带 CORS 头的站点会被拦截。搜索、新闻
 
 ### 发布新版本（维护者）
 
-1. 改 `src-tauri/tauri.conf.json`、`package.json`、`src-tauri/Cargo.toml` 里的版本号，更新说明写在 `release-notes/vX.Y.Z.md`
-2. `npm run tauri:build`：本机有签名私钥（默认 `~/.tauri/paw-updater.key`，**绝不提交**）时会同时生成自动更新用的签名
-3. `npm run release`：生成 `latest.json` 并列出要上传的文件；确认无误后 `npm run release -- --publish` 用 `gh` 创建 GitHub Release
+1. 改 `src-tauri/tauri.conf.json`、`package.json`、`src-tauri/Cargo.toml` 里的版本号，更新说明写在 `release-notes/vX.Y.Z.md`，提交并推送
+2. 打标签并推送：`git tag vX.Y.Z && git push origin vX.Y.Z`。GitHub Actions（`.github/workflows/release.yml`）会在 Windows 机器上打包、签名，发布到 Releases，并附上 `latest.json`
+   - 标签和三处版本号对不上时会直接报错，不会发出去
+   - 需要先在仓库 Settings → Secrets and variables → Actions 里添加 `TAURI_SIGNING_PRIVATE_KEY`（签名私钥的内容）
+   - 想先试试能不能打包：在 Actions 页面手动运行 Release，只打包不发布，安装包在构建产物里下载
+
+GitHub 用不了时也可以在本机发：`npm run tauri:build`（本机有签名私钥 `~/.tauri/paw-updater.key`，**绝不提交**）后 `npm run release -- --publish`。注意本机打包会带上 `public/` 里没进 git 的文件。
 
 已安装的 Paw 会从 `releases/latest/download/latest.json` 发现新版本，用 `tauri.conf.json` 里的公钥校验签名后安装。
 

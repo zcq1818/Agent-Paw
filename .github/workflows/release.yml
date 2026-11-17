@@ -1,0 +1,107 @@
+# 自动打包发版
+# - 推送 vX.Y.Z 标签：在 GitHub 的 Windows 机器上打包、签名，发布到 Releases（含自动更新用的 latest.json）
+# - 在 Actions 页面手动运行：只打包，不发布，安装包作为构建产物下载，用来试跑
+#
+# 需要在仓库 Settings → Secrets and variables → Actions 里添加：
+#   TAURI_SIGNING_PRIVATE_KEY  自动更新签名私钥（本机 ~/.tauri/paw-updater.key 的内容）
+# 打包用的是仓库里的代码，没进 git 的东西（比如 public/models/pets/custom）不会打进安装包。
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Check signing key
+        shell: bash
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::仓库 Secrets 里还没有 TAURI_SIGNING_PRIVATE_KEY，打出来的包无法自动更新"
+            exit 1
+          fi
+
+      - name: Check version and read release notes
+        id: meta
+        shell: bash
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          pkg=$(node -p "require('./package.json').version")
+          cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)
+          if [ "$version" != "$pkg" ] || [ "$version" != "$cargo" ]; then
+            echo "::error::版本号不一致：tauri.conf.json=$version package.json=$pkg Cargo.toml=$cargo"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::标签 $GITHUB_REF_NAME 和版本号 $version 对不上，应该打 v$version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          notes="release-notes/v$version.md"
+          {
+            echo 'notes<<PAW_NOTES_EOF'
+            if [ -f "$notes" ]; then cat "$notes"; else echo "Paw v$version"; fi
+            echo
+            echo 'PAW_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - run: npm ci
+
+      - name: Build and publish release
+        if: github.ref_type == 'tag'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Paw ${{ github.ref_name }}
+          releaseBody: ${{ steps.meta.outputs.notes }}
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
+
+      - name: Build only (manual run)
+        if: github.ref_type != 'tag'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: npm run tauri build
+
+      - name: Upload installer (manual run)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Paw-${{ steps.meta.outputs.version }}-windows
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.sig
+          if-no-files-found: error
