@@ -13,6 +13,7 @@ mod oauth_callback;
 mod skills;
 mod ocr;
 mod paths;
+mod pets;
 mod timeline;
 mod tray;
 
@@ -468,6 +469,8 @@ pub fn run() {
             oauth_callback::oauth_cancel,
             skills::skills_root,
             skills::skills_scan,
+            pets::custom_pets_list,
+            pets::custom_pet_file,
             skills::skill_read_file,
             skills::skill_save,
             skills::skill_delete,

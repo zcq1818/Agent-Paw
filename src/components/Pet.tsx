@@ -11,7 +11,7 @@ import {
 import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { PetBubble } from "./PetBubble";
-import { BUILTIN_AVATARS, describeAvatar, loadCustomAvatars } from "../store/petAvatars";
+import { BUILTIN_AVATARS, describeAvatar, loadCustomAvatars, useCustomAvatarsLoaded } from "../store/petAvatars";
 import { bubbleText } from "../utils/bubbleText";
 import { usePetStore } from "../store/pet";
 import { useChatStore } from "../store/chat";
@@ -338,6 +338,7 @@ export function Pet() {
   const emotion = usePetStore((state) => state.emotion);
   const avatar = usePetStore((state) => state.avatar);
   const petName = usePetStore((state) => state.name);
+  useCustomAvatarsLoaded();
   const avatarInfo = describeAvatar(avatar);
   const autoAction = usePetStore((state) => state.autoAction);
   const timeOfDay = usePetStore((state) => state.timeOfDay);

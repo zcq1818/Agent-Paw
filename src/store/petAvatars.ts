@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { PetAvatar } from "./pet";
 
 /**
  * 桌宠形态清单。
  * - rigged：Blender 生成的带骨骼 + 动作片段的 GLB（RiggedPet3D），
  *   源码见 tools/pets/build_pets.py
- * 私人定制形象放在 public/models/pets/custom/（不进 git），通过同目录的 manifest.json 发现。
+ * 私人定制形象放在数据文件夹的 pets 里（发布版是安装目录下的 data\pets），不进 git，也不打进安装包：
+ *   manifest.json + xxx.glb + thumbs/xxx.png，由后端读出来转成 blob 地址。
+ * 开发时数据文件夹里没有的话，再看 public/models/pets/custom/（只有 vite 开发服务器能访问，打包时会被删掉）。
  */
 export interface AvatarOption {
   value: PetAvatar;
@@ -36,27 +39,86 @@ interface ManifestEntry {
 let customCache: AvatarOption[] | null = null;
 let customPromise: Promise<AvatarOption[]> | null = null;
 
+function toOption(entry: ManifestEntry, model: string, thumb?: string): AvatarOption {
+  return {
+    value: `custom:${entry.id}` as PetAvatar,
+    label: entry.label || entry.id,
+    description: entry.description || "私人定制形象（只保存在本机）。",
+    kind: "rigged",
+    model,
+    thumb,
+  };
+}
+
+async function fileUrl(id: string, thumb: boolean): Promise<string> {
+  const data = await invoke<ArrayBuffer>("custom_pet_file", { id, thumb });
+  return URL.createObjectURL(new Blob([data], { type: thumb ? "image/png" : "model/gltf-binary" }));
+}
+
+/** 数据文件夹 pets 里的形象 */
+async function loadFromDataDir(): Promise<AvatarOption[]> {
+  const entries = await invoke<ManifestEntry[]>("custom_pets_list").catch(() => []);
+  const options = await Promise.all(
+    entries.map(async (entry) => {
+      try {
+        const model = await fileUrl(entry.id, false);
+        const thumb = await fileUrl(entry.id, true).catch(() => undefined);
+        return toOption(entry, model, thumb);
+      } catch {
+        return null;
+      }
+    })
+  );
+  return options.filter((option): option is AvatarOption => Boolean(option));
+}
+
+/** 开发服务器上 public/models/pets/custom 里的形象 */
+async function loadFromDevServer(): Promise<AvatarOption[]> {
+  try {
+    const resp = await fetch(CUSTOM_MANIFEST, { cache: "no-cache" });
+    if (!resp.ok || !(resp.headers.get("content-type") || "").includes("json")) return [];
+    const entries: ManifestEntry[] = await resp.json();
+    return (Array.isArray(entries) ? entries : [])
+      .filter((entry) => entry && /^[\w-]+$/.test(entry.id || ""))
+      .map((entry) => toOption(entry, `/models/pets/custom/${entry.id}.glb`, `/models/pets/custom/thumbs/${entry.id}.png`));
+  } catch {
+    return [];
+  }
+}
+
 export function loadCustomAvatars(): Promise<AvatarOption[]> {
   if (customCache) return Promise.resolve(customCache);
   if (!customPromise) {
-    customPromise = fetch(CUSTOM_MANIFEST, { cache: "no-cache" })
-      .then((resp) => (resp.ok ? resp.json() : []))
-      .then((entries: ManifestEntry[]) =>
-        (Array.isArray(entries) ? entries : [])
-          .filter((entry) => entry && /^[\w-]+$/.test(entry.id || ""))
-          .map<AvatarOption>((entry) => ({
-            value: `custom:${entry.id}` as PetAvatar,
-            label: entry.label || entry.id,
-            description: entry.description || "私人定制形象（只保存在本机）。",
-            kind: "rigged",
-            model: `/models/pets/custom/${entry.id}.glb`,
-            thumb: `/models/pets/custom/thumbs/${entry.id}.png`,
-          }))
-      )
+    customPromise = loadFromDataDir()
+      .then(async (list) => (list.length ? list : loadFromDevServer()))
       .catch(() => [])
-      .then((list) => (customCache = list));
+      .then((list) => {
+        customCache = list;
+        notifyLoaded();
+        return list;
+      });
   }
   return customPromise;
+}
+
+const loadedListeners = new Set<() => void>();
+function notifyLoaded() {
+  loadedListeners.forEach((listener) => listener());
+}
+
+/** 用了私人定制形象时，等清单读出来后刷新一次（读出来之前先显示内置形象）。 */
+export function useCustomAvatarsLoaded(): boolean {
+  const [loaded, setLoaded] = useState(Boolean(customCache));
+  useEffect(() => {
+    if (customCache) return;
+    const listener = () => setLoaded(true);
+    loadedListeners.add(listener);
+    void loadCustomAvatars();
+    return () => {
+      loadedListeners.delete(listener);
+    };
+  }, []);
+  return loaded;
 }
 
 /** 内置形态 + 本机私人定制形态。 */
@@ -76,17 +138,10 @@ export function describeAvatar(avatar: PetAvatar): AvatarOption {
   const builtin = BUILTIN_AVATARS.find((item) => item.value === avatar);
   if (builtin) return builtin;
   if (avatar.startsWith("custom:")) {
-    const id = avatar.slice("custom:".length);
-    return (
-      customCache?.find((item) => item.value === avatar) || {
-        value: avatar,
-        label: id,
-        description: "",
-        kind: "rigged",
-        model: `/models/pets/custom/${id}.glb`,
-        thumb: `/models/pets/custom/thumbs/${id}.png`,
-      }
-    );
+    const found = customCache?.find((item) => item.value === avatar);
+    if (found) return found;
+    // 清单还没读出来，或者这个形象的文件不在了：先用默认形象
+    void loadCustomAvatars();
   }
   return BUILTIN_AVATARS[0];
 }

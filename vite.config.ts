@@ -1,11 +1,24 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import fs from "fs";
 import path from "path";
+import type { Plugin } from "vite";
 
 const host = process.env.TAURI_DEV_HOST;
 
+/** 私人定制的桌宠形象（public/models/pets/custom，不进 git）只在开发时用，打包时从 dist 里删掉，免得进安装包。 */
+function excludePrivatePets(): Plugin {
+  return {
+    name: "paw-exclude-private-pets",
+    apply: "build",
+    closeBundle() {
+      fs.rmSync(path.resolve(__dirname, "dist/models/pets/custom"), { recursive: true, force: true });
+    },
+  };
+}
+
 export default defineConfig(async () => ({
-  plugins: [react()],
+  plugins: [react(), excludePrivatePets()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

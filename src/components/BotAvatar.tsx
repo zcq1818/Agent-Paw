@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { describeAvatar } from "../store/petAvatars";
+import { describeAvatar, useCustomAvatarsLoaded } from "../store/petAvatars";
 import type { BotProfile } from "../store/bots";
 
 /**
@@ -55,12 +55,14 @@ function Thumb({ src, alt, size }: { src: string; alt: string; size: number }) {
 }
 
 export function BotAvatar({ bot, size = 28 }: { bot: BotProfile; size?: number }) {
+  useCustomAvatarsLoaded();
   const info = bot.petAvatar ? describeAvatar(bot.petAvatar) : null;
   if (info?.thumb) return <Thumb src={info.thumb} alt={bot.name} size={size} />;
   return <Emoji bot={bot} size={size} />;
 }
 
 export function BotPortrait({ bot, size = 96 }: { bot: BotProfile; size?: number }) {
+  useCustomAvatarsLoaded();
   const info = bot.petAvatar ? describeAvatar(bot.petAvatar) : null;
   if (info?.thumb) return <Thumb src={info.thumb} alt={bot.name} size={size} />;
   return <Emoji bot={bot} size={size} />;
