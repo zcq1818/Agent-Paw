@@ -134,3 +134,87 @@ jobs:
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/nsis/*.sig
           if-no-files-found: error
+
+  # macOS 版：Windows 版发完之后再跑，把 .dmg 和自动更新包追加到同一个 Release，latest.json 里合并进 darwin 平台。
+  # 通用包（Intel 和 Apple 芯片都能装）；没有苹果开发者证书，只做本机签名，第一次打开要在“系统设置 → 隐私与安全性”里点“仍要打开”。
+  # 某个版本已经发过 Windows 版但还没有 mac 版时，推一次这个文件就会补上 mac 版。
+  macos:
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide what to do
+        id: meta
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          tag="v$version"
+          mode=build
+          if [ "$GITHUB_REF_TYPE" = "tag" ] || [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            mode=publish
+            assets=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || true)
+            if echo "$assets" | grep -q '\.app\.tar\.gz$'; then
+              mode=skip
+              echo "::notice::$tag 已经有 mac 版，这次不打包"
+            fi
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "版本 $version → $mode"
+
+      - uses: actions/setup-node@v4
+        if: steps.meta.outputs.mode != 'skip'
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.meta.outputs.mode != 'skip'
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        if: steps.meta.outputs.mode != 'skip'
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+        if: steps.meta.outputs.mode != 'skip'
+
+      - name: Build and publish release (macOS)
+        if: steps.meta.outputs.mode == 'publish'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          APPLE_SIGNING_IDENTITY: "-"
+        with:
+          tagName: ${{ steps.meta.outputs.tag }}
+          releaseName: Paw ${{ steps.meta.outputs.tag }}
+          releaseCommitish: ${{ github.sha }}
+          releaseDraft: false
+          prerelease: false
+          uploadUpdaterJson: true
+          args: --target universal-apple-darwin --bundles app,dmg
+
+      - name: Build only (manual run, macOS)
+        if: steps.meta.outputs.mode == 'build'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          APPLE_SIGNING_IDENTITY: "-"
+        run: npm run tauri build -- --target universal-apple-darwin --bundles app,dmg
+
+      - name: Upload installer (manual run, macOS)
+        if: steps.meta.outputs.mode == 'build'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Paw-${{ steps.meta.outputs.version }}-macos
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
