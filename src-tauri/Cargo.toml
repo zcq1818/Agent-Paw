@@ -1,6 +1,6 @@
 [package]
 name = "paw"
-version = "0.1.2"
+version = "0.1.3"
 description = "皮卡丘桌面宠物 Agent"
 authors = ["you"]
 edition = "2021"
