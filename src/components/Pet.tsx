@@ -381,8 +381,16 @@ export function Pet() {
     pauseMotion(1800);
   }, [pauseMotion]);
 
+  // 有任何弹出的东西（菜单、聊天框、气泡、播报、提议、卡片）时桌宠不走动，不然窗口会被带着跑。
+  // 用 ref：走动循环里每一步都要看到最新状态（走到一半打开聊天框也要立刻停）。
+  const popupOpenRef = useRef(false);
+  popupOpenRef.current = Boolean(
+    showMenu || showMiniChat || bubbleMessage || newsBanner || routineBanner || offer || dropFiles || wrap || hint || update
+  );
+
   const shouldPauseMotion = useCallback(() => {
     return (
+      popupOpenRef.current ||
       hoverPetRef.current ||
       chatActiveRef.current ||
       Date.now() < pauseMotionUntilRef.current ||
@@ -395,6 +403,8 @@ export function Pet() {
       isQuietNow(quietHoursEnabled, quietStart, quietEnd)
     );
   }, [isDragging, isStreaming, quietEnd, quietHoursEnabled, quietStart, showMenu, showMiniChat]);
+  const shouldPauseMotionRef = useRef(shouldPauseMotion);
+  shouldPauseMotionRef.current = shouldPauseMotion;
 
   const resetToDefaultState = useCallback(() => {
     setStatusText(null);
@@ -517,7 +527,9 @@ export function Pet() {
 
   const moveTo = useCallback(
     async (target: { x: number; y: number }, reason: "wander" | "cursor" | "edge" = "wander", force = false) => {
-      if (movingRef.current || (!force && shouldPauseMotion())) return false;
+      // 贴边（edge）是把窗口挪回屏幕内，弹框开着也要做；其它走动有弹框就不走
+      const blocked = () => (reason !== "edge" && popupOpenRef.current) || (!force && shouldPauseMotionRef.current());
+      if (movingRef.current || blocked()) return false;
       movingRef.current = true;
       try {
         const appWindow = getCurrentWindow();
@@ -534,7 +546,7 @@ export function Pet() {
 
         const steps = clamp(Math.round(distance(start, safeTarget) / 18), 18, 54);
         for (let step = 1; step <= steps; step += 1) {
-          if (dragRef.current || (!force && shouldPauseMotion())) break;
+          if (dragRef.current || blocked()) break;
           const t = easeOutCubic(step / steps);
           const x = Math.round(start.x + dx * t);
           const y = Math.round(start.y + dy * t);
@@ -1735,6 +1747,53 @@ export function Pet() {
 
   const closeBubble = useCallback(() => setBubbleMessage(null), []);
 
+  // 点别处就收起：右键菜单、气泡、播报、提议、提示、小结、拖入文件卡片、更新提示（正在下载更新时不收）。
+  // 聊天框有自己的收起逻辑（上面的 onFocusChanged），专注计时和干活进度是常驻状态，不收。
+  const dismissPopups = useCallback(() => {
+    setShowMenu(false);
+    setBubbleMessage(null);
+    setNewsBanner(null);
+    setRoutineBanner(null);
+    setOffer(null);
+    setHint(null);
+    setWrap(null);
+    setDropFiles(null);
+    if (updateProgress === null) setUpdate(null);
+  }, [updateProgress]);
+  const dismissPopupsRef = useRef(dismissPopups);
+  dismissPopupsRef.current = dismissPopups;
+
+  // 桌宠窗口失去焦点（点了桌面或别的软件）
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    try {
+      getCurrentWindow()
+        .onFocusChanged(({ payload: focused }) => {
+          if (focused || resizeRef.current || dragRef.current) return;
+          dismissPopupsRef.current();
+        })
+        .then((fn) => (disposed ? fn() : (unlisten = fn)))
+        .catch(() => {});
+    } catch {
+      // Browser dev fallback.
+    }
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // 点了桌宠窗口里的透明空白处（不是宠物、也不是任何卡片）
+  const handleBackgroundPointerDown = useCallback(
+    (event: React.PointerEvent) => {
+      if (event.target !== event.currentTarget || event.button !== 0) return;
+      dismissPopups();
+      if (showMiniChat) closeMiniChat();
+    },
+    [closeMiniChat, dismissPopups, showMiniChat]
+  );
+
   const handlePetPointerEnter = useCallback(() => {
     hoverPetRef.current = true;
     pauseMotion(3200);
@@ -1750,7 +1809,11 @@ export function Pet() {
   const recentMessages = messages.slice(-30);
 
   return (
-    <div className={`pet-window ${themeClass} relative h-screen w-screen select-none overflow-hidden`} onContextMenu={handleContextMenu}>
+    <div
+      className={`pet-window ${themeClass} relative h-screen w-screen select-none overflow-hidden`}
+      onContextMenu={handleContextMenu}
+      onPointerDown={handleBackgroundPointerDown}
+    >
       {dropFiles && !showMiniChat && (
         <DropCard
           files={dropFiles}
