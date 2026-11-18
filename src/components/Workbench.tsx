@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Activity,
   Brain,
+  Briefcase,
   EyeOff,
   Check,
   Eye,
@@ -37,9 +38,11 @@ import { ActivityPanel } from "./ActivityPanel";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { PageHeader, useElementWidth } from "./ui";
 import { McpServersCard } from "./McpSettings";
+import { JobsPanel } from "./JobsPanel";
 
 export type WorkbenchView =
   | "chat"
+  | "jobs"
   | "team"
   | "rooms"
   | "chief"
@@ -55,6 +58,7 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ view: WorkbenchView; lab
   {
     title: "协作",
     items: [
+      { view: "jobs", label: "工作", icon: <Briefcase size={16} /> },
       { view: "team", label: "团队", icon: <Users size={16} /> },
       { view: "rooms", label: "房间", icon: <MessagesSquare size={16} /> },
       { view: "chief", label: "总管", icon: <Network size={16} /> },
@@ -177,6 +181,9 @@ export function Workbench() {
       break;
     case "settings":
       content = <Settings key={settingsSection} initialSection={settingsSection} onBack={backToChat} onOpenSidebar={openSidebar} />;
+      break;
+    case "jobs":
+      content = <JobsPanel onClose={backToChat} />;
       break;
     case "team":
       content = <BotRoster onClose={backToChat} />;

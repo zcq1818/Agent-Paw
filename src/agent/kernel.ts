@@ -20,6 +20,7 @@ import { getSkillLibraryTools, skillIndexPrompt, useSkillLibrary } from "./skill
 import type { ToolEvent } from "./toolEvents";
 import { BROWSER_USER_AGENT, fetchExternal } from "./http";
 import { bondPrompt } from "./bond";
+import { getJobTools } from "./jobs";
 import { formatSearchResults, readWebpage, searchWeb } from "./webSearch";
 import {
   defaultProfileName,
@@ -498,6 +499,8 @@ Agent 行为准则：
   if (timelineEnabled()) prompt += `\n\n${TIMELINE_PROMPT}`;
   const mcpSection = mcpPromptSection();
   if (mcpSection) prompt += `\n\n${mcpSection}`;
+  prompt +=
+    "\n\n## 工作任务\n用户交代一件要很多步、花时间的事（调研整理、批量处理、查资料写报告），或者说“交给你干 / 你自己去做”，用 start_job 交给后台去做，告诉用户你接下了；问进度用 get_jobs。简单的事直接做，不要开任务。";
   prompt += "\n\n## 自动任务\n用户要求“每天 / 每周 / 工作日 几点帮我做某事”时，用 create_automation 建定时任务，不要只口头答应。";
   prompt +=
     "\n\n## 软件签到\n用户让你去某个软件签到、领积分时，先用 list_app_flows 看有没有现成流程，有就 run_app_flow；要每天自动做，用 create_automation 并填 flow。没有现成流程时，问清楚界面上要依次点哪些文字，再用 create_app_flow 学会它。";
@@ -704,8 +707,24 @@ export function getTools(): Tool[] {
   tools.push(...getAutomationTools());
   tools.push(...getDocumentTools());
   tools.push(...getSkillLibraryTools());
+  tools.push(...getJobTools());
   tools.push(...getMcpTools());
   return tools;
+}
+
+export interface StreamChatOptions {
+  signal?: AbortSignal;
+  onToolEvent?: (event: ToolEvent) => void;
+  /** 后台工作：不接聊天里的插话，不学习聊天习惯，不提炼记忆 */
+  background?: boolean;
+  /** 追加到系统提示末尾 */
+  systemExtra?: string;
+  /** 额外的工具（工作模式的进度汇报等） */
+  extraTools?: Tool[];
+  /** 不给模型用的工具 */
+  excludeTools?: string[];
+  /** 工具调用轮次上限 */
+  maxRounds?: number;
 }
 
 export interface ChatRequest {
@@ -768,8 +787,9 @@ async function executeRuntimeToolCalls(
 export async function streamChat(
   request: ChatRequest,
   onChunk: (text: string) => void,
-  options: { signal?: AbortSignal; onToolEvent?: (event: ToolEvent) => void } = {}
+  options: StreamChatOptions = {}
 ): Promise<string> {
+  const background = options.background === true;
   const config = loadConfig();
   // 本机智能体（Claude Code / CodeBuddy Code）用用户自己登录的账号，不需要 API Key
   const localAgent = localAgentOf(config.provider);
@@ -797,7 +817,9 @@ export async function streamChat(
   const skillsContext = skillIndexPrompt();
   if (skillsContext) systemPrompt += "\n\n" + skillsContext;
 
-  if (config.enablePersonality !== false) {
+  if (options.systemExtra) systemPrompt += `\n\n${options.systemExtra}`;
+
+  if (config.enablePersonality !== false && !background) {
     personalityStore.learnFromConversation(userText, true);
     personalityStore.trackEvent("message", "user_sent");
   }
@@ -810,7 +832,8 @@ export async function streamChat(
     })),
   ];
 
-  const tools = getTools();
+  const excluded = new Set(options.excludeTools || []);
+  const tools = [...getTools().filter((tool) => !excluded.has(tool.name)), ...(options.extraTools || [])];
 
   if (localAgent) {
     const { runClaudeLocal, localAgentPrompt } = await import("./claudeLocal");
@@ -854,19 +877,20 @@ export async function streamChat(
   let shouldSendTools = config.enableTools !== false;
   let fullText = "";
   // 操作电脑往往要“看界面 → 点 → 再看”很多步，开启电脑控制时放宽工具轮次。
-  let maxRounds = config.computerControl !== "off" ? 24 : 10;
+  let maxRounds = options.maxRounds ?? (config.computerControl !== "off" ? 24 : 10);
   let ranOutOfRounds = true;
   let hitLengthLimit = false;
 
   // 用户在运行中补充的话：塞进对话，模型下一轮就能看到
   const injectInterjections = () => {
+    if (background) return;
     for (const text of takeInterjections()) {
       currentMessages.push({ role: "user", content: formatInterjection(text) });
     }
   };
   // 模型本来要结束了，但用户又补充了：把这轮的回复记下来，再跑一轮回应补充内容
   const continueForInterjection = (roundText: string) => {
-    if (!hasInterjections() || maxRounds <= 0) return false;
+    if (background || !hasInterjections() || maxRounds <= 0) return false;
     currentMessages.push({ role: "assistant", content: roundText || "（继续处理中）" });
     if (fullText && !fullText.endsWith("\n\n")) {
       fullText += "\n\n";
@@ -1097,7 +1121,7 @@ export async function streamChat(
 
   // 自动记忆：只在用户谈到自己（偏好、习惯、身份……）或说“记住”时才额外调一次模型提炼，
   // 而且只发这一轮的问答，不再每轮把最近 5 条消息重复发一遍。
-  if (config.enableMemory !== false && worthExtracting(userText)) {
+  if (config.enableMemory !== false && !background && worthExtracting(userText)) {
     const conversation = `user: ${userText.slice(0, 1500)}\nassistant: ${fullText.slice(0, 800)}`;
     setTimeout(() => {
       memoryStore.extractAndSaveMemories(conversation).catch(() => {});

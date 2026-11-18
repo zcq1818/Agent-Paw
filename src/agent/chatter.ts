@@ -1,13 +1,5 @@
 import { BROWSER_USER_AGENT, fetchExternal } from "./http";
-import {
-  buildAnthropicRequest,
-  buildChatCompletionsUrl,
-  buildRequestHeaders,
-  fetchModelApi,
-  isAnthropicProvider,
-  loadConfig,
-  parseConfigJson,
-} from "./kernel";
+import { quickComplete, quickModelAvailable } from "./llm";
 import { DEFAULT_PET_NAME, usePetStore } from "../store/pet";
 
 /**
@@ -99,42 +91,7 @@ export async function fetchHotTopics(): Promise<HotTopic[]> {
 
 /** 本机 Claude / CodeBuddy 之类走命令行的模型太慢，闲聊不用它们。 */
 export function chatterAvailable(): boolean {
-  const config = loadConfig();
-  if (!config.apiKey || !config.baseUrl || !config.model) return false;
-  return !/local/i.test(config.provider || "");
-}
-
-// 推理模型（如星火 X2、DeepSeek R1）会先花几百个 token 思考，上限给小了正文会是空的
-async function quickComplete(system: string, prompt: string, maxTokens = 1500): Promise<string> {
-  const config = loadConfig();
-  if (isAnthropicProvider(config)) {
-    const request = buildAnthropicRequest(config, system, prompt);
-    const resp = await fetchModelApi(request.url, {
-      method: "POST",
-      headers: request.headers,
-      body: JSON.stringify({ ...request.body, max_tokens: maxTokens, temperature: 1 }),
-    });
-    if (!resp.ok) return "";
-    const data = await resp.json();
-    return (data?.content || []).map((block: any) => (block?.type === "text" ? block.text : "")).join("");
-  }
-  const resp = await fetchModelApi(buildChatCompletionsUrl(config), {
-    method: "POST",
-    headers: buildRequestHeaders(config),
-    body: JSON.stringify({
-      ...parseConfigJson(config.extraBody),
-      model: config.model,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: prompt },
-      ],
-      temperature: 1,
-      max_tokens: maxTokens,
-    }),
-  });
-  if (!resp.ok) return "";
-  const data = await resp.json();
-  return data?.choices?.[0]?.message?.content || "";
+  return quickModelAvailable();
 }
 
 function nowText() {
@@ -196,7 +153,7 @@ export async function generateChatter(kind: ChatterKind, hotTopics: HotTopic[] =
     prompt = `${KIND_PROMPTS[kind]}${recent ? `\n\n最近说过的话（别重复类似内容）：\n${recent}` : ""}`;
   }
 
-  const raw = await quickComplete(system, prompt, 1500).catch(() => "");
+  const raw = await quickComplete(system, prompt).catch(() => "");
   const reply = parseReply(raw);
   if (!reply) return null;
 

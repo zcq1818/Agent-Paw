@@ -20,6 +20,7 @@ import { useThemeClass } from "../store/theme";
 import { useActivityMonitor, useActivityStore, checkAndDeliverYesterdaySummary } from "../store/activity";
 import { usePetProactivity } from "../agent/proactivity";
 import { chatterAvailable, fetchHotTopics, generateChatter, type ChatterKind } from "../agent/chatter";
+import { jobProgress, reportHeadline, useJobRunner, useJobStore, type Job } from "../agent/jobs";
 import { BOND_GAIN_EVENT, levelInfo, unlocksAtLevel, useBondStore, type BondSource, type GainResult } from "../agent/bond";
 import { applyTimelineConfig } from "../agent/timeline";
 import { useAutomationRunner, useAutomationStore } from "../agent/automations";
@@ -262,9 +263,10 @@ async function getActiveWorkArea(): Promise<WorkArea> {
   };
 }
 
-async function showMainWindow(view: "chat" | "settings") {
+async function showMainWindow(view: "chat" | "settings" | "jobs") {
   try {
-    await emit(view === "chat" ? "open-chat" : "open-settings");
+    if (view === "jobs") await emit("open-view", { view: "jobs" });
+    else await emit(view === "chat" ? "open-chat" : "open-settings");
     const windows = await getAllWindows();
     const mainWindow = windows.find((window) => window.label === "main");
     if (mainWindow) {
@@ -468,6 +470,28 @@ export function Pet() {
       unlisten?.();
     };
   }, [quietEnd, quietHoursEnabled, quietStart]);
+
+  // 工作任务：在桌宠窗口里排队执行，开工和干完都说一声
+  useJobRunner({
+    onStart: (job: Job) => {
+      speakRef.current(`开工：${job.title}。我在后台干，你忙你的。`, 4500, "thinking");
+    },
+    onFinish: (job: Job) => {
+      if (job.status === "done") {
+        const headline = reportHeadline(job.report);
+        addMessage({
+          role: "assistant",
+          content: `## ✅ 活干完了：${job.title}\n\n${headline || "报告写好了。"}\n\n完整的工作日志和报告在工作台 →「工作」。`,
+        });
+        speakRef.current(`活干完了：${job.title}。${headline ? headline.slice(0, 40) : ""}`, 9000, "dance");
+        gainBondRef.current("interact", 2);
+      } else {
+        addMessage({ role: "assistant", content: `## ⚠️ 没干完：${job.title}\n\n${job.error || "中途出错了"}\n\n工作日志在工作台 →「工作」。` });
+        speakRef.current(`「${job.title}」没干完：${(job.error || "中途出错了").slice(0, 40)}`, 8000, "look");
+      }
+    },
+  });
+  const runningJob = useJobStore((state) => state.jobs.find((job) => job.status === "running"));
 
   useActivityMonitor();
 
@@ -1697,6 +1721,10 @@ export function Pet() {
         <FocusBadge endsAt={focus.endsAt} minutes={focus.minutes} onCancel={cancelFocus} />
       )}
 
+      {runningJob && !focus && !showMiniChat && !dropFiles && !wrap && !hint && !update && !offer && (
+        <JobChip job={runningJob} onOpen={() => void showMainWindow("jobs")} />
+      )}
+
       {dragOver && (
         <div className="pointer-events-none absolute inset-2 z-30 rounded-3xl border-2 border-dashed border-primary/70 bg-primary/5" />
       )}
@@ -1916,6 +1944,7 @@ export function Pet() {
             onFocus={startFocus}
           />
           <MenuItem label="聊天" onClick={() => { setShowMenu(false); openMiniChat(); }} />
+          <MenuItem label="交代工作" onClick={() => { setShowMenu(false); void showMainWindow("jobs"); }} />
           <MenuItem label="下班小结" onClick={() => { setShowMenu(false); void showWrapNow(); }} />
           <MenuItem label="叫团队出来" onClick={() => { setShowMenu(false); void emit("squad-toggle"); }} />
           <MenuItem label="打开工作台" onClick={() => { setShowMenu(false); showMainWindow("chat"); }} />
@@ -1951,6 +1980,24 @@ function MenuItem({ label, onClick }: { label: string; onClick: () => void }) {
       onClick={onClick}
     >
       <span>{label}</span>
+    </button>
+  );
+}
+
+/** 桌宠头顶的小条：正在干的活和进度，点一下看详情 */
+function JobChip({ job, onOpen }: { job: Job; onOpen: () => void }) {
+  const progress = jobProgress(job);
+  const label = progress.current?.text || (progress.total ? "整理结果" : "列计划");
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title={`${job.title}：点我看工作日志`}
+      className="absolute left-1/2 top-3 z-30 flex max-w-[92%] -translate-x-1/2 items-center gap-1.5 rounded-full border border-line bg-surface/95 py-1 pl-2 pr-2.5 text-[11px] text-fg shadow-md backdrop-blur pointer-events-auto"
+    >
+      <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
+      <span className="shrink-0 font-medium">干活中{progress.total ? ` ${progress.done}/${progress.total}` : ""}</span>
+      <span className="min-w-0 truncate text-fg-muted">{label}</span>
     </button>
   );
 }
