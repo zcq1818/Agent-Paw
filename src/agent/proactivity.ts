@@ -7,6 +7,7 @@ import { personalityStore } from "./personality";
 import { customSkillsStore } from "./customSkills";
 import { fetchTodayNews, formatNewsBubble, formatNewsMarkdown, markTodayNewsPushed, shouldPushTodayNews } from "./news";
 import { selectProactivePlan } from "./decision";
+import { chatterAvailable, fetchHotTopics, generateChatter, type ChatterKind } from "./chatter";
 
 type PetPose = "idle" | "walk" | "sit" | "sleep" | "excited" | "thinking" | "morning" | "night" | "dance" | "stretch" | "look" | "wave";
 type SpeakFn = (message: string, duration?: number, pose?: PetPose) => void;
@@ -21,11 +22,19 @@ interface UsePetProactivityOptions {
   autonomousLearning: boolean;
   enableInteractions: boolean;
   autoAction: boolean;
+  interactionFrequency: "rare" | "normal" | "frequent";
 }
 
 const COOLDOWN_KEY = "paw_proactivity_cooldowns";
 const LAST_RUN_KEY = "paw_proactivity_last_run";
-const MIN_RUN_INTERVAL_MS = 12 * 60_000;
+// 两次主动行为之间至少隔多久（按“互动频率”设置）；搭话的冷却和它一样。
+const MIN_RUN_INTERVAL_MS: Record<"rare" | "normal" | "frequent", number> = {
+  rare: 30 * 60_000,
+  normal: 15 * 60_000,
+  frequent: 7 * 60_000,
+};
+const CHECK_INTERVAL_MS = 2 * 60_000;
+const LAST_CHATTER_KIND_KEY = "paw_chatter_last_kind";
 const NEWS_COOLDOWN_MS = 45 * 60_000;
 const ACTIVITY_COOLDOWN_MS = 45 * 60_000;
 const SUGGESTION_COOLDOWN_MS = 35 * 60_000;
@@ -62,6 +71,27 @@ function minutesSince(timestamp: number) {
   return (Date.now() - timestamp) / 60_000;
 }
 
+/** 选这次聊什么：有热搜时多聊热搜，饭点和深夜多关心一句，不和上次重复。 */
+function pickChatterKind(hour: number, hasHot: boolean): ChatterKind {
+  const weights: Record<ChatterKind, number> = {
+    joke: 3,
+    hot: hasHot ? 4 : 0,
+    fact: 2,
+    care: [11, 12, 17, 18, 22, 23].includes(hour) ? 3 : 1,
+    topic: 1.5,
+  };
+  const last = localStorage.getItem(LAST_CHATTER_KIND_KEY) as ChatterKind | null;
+  if (last && last in weights) weights[last] = 0;
+  const entries = Object.entries(weights) as Array<[ChatterKind, number]>;
+  const total = entries.reduce((sum, [, weight]) => sum + weight, 0);
+  let roll = Math.random() * total;
+  for (const [kind, weight] of entries) {
+    roll -= weight;
+    if (roll <= 0 && weight > 0) return kind;
+  }
+  return "joke";
+}
+
 export function usePetProactivity({
   shouldPauseMotion,
   speak,
@@ -72,6 +102,7 @@ export function usePetProactivity({
   autonomousLearning,
   enableInteractions,
   autoAction,
+  interactionFrequency,
 }: UsePetProactivityOptions) {
   const cooldownsRef = useRef<Cooldowns>(loadCooldowns());
   const runningRef = useRef(false);
@@ -85,11 +116,12 @@ export function usePetProactivity({
     const shouldPauseMotion = () => callbacksRef.current.shouldPauseMotion();
     const speak: SpeakFn = (...args) => callbacksRef.current.speak(...args);
     const addMessage = (message: { role: "assistant"; content: string }) => callbacksRef.current.addMessage(message);
+    const minInterval = MIN_RUN_INTERVAL_MS[interactionFrequency] || MIN_RUN_INTERVAL_MS.normal;
 
     const run = async () => {
       if (disposed || runningRef.current || shouldPauseMotion()) return;
       const lastRun = Number(localStorage.getItem(LAST_RUN_KEY) || "0");
-      if (lastRun && Date.now() - lastRun < MIN_RUN_INTERVAL_MS) return;
+      if (lastRun && Date.now() - lastRun < minInterval) return;
 
       runningRef.current = true;
       try {
@@ -109,12 +141,16 @@ export function usePetProactivity({
         const newsAllowed =
           autonomousNews && shouldPushTodayNews("autonomous") && !isCooldownActive(cooldowns, "news", NEWS_COOLDOWN_MS);
         const newsItems = newsAllowed ? await fetchTodayNews() : [];
+        const chatterAllowed =
+          enableInteractions && chatterAvailable() && !isCooldownActive(cooldowns, "chatter", minInterval);
+        const hotTopics = chatterAllowed && autonomousNews ? await fetchHotTopics() : [];
+        const hour = new Date().getHours();
         const skillExists = customSkillsStore
           .getAll()
           .some((skill) => skill.tags.includes("autonomous-learning") && skill.name === "常用应用操作助手");
 
         const plan = selectProactivePlan({
-          hour: new Date().getHours(),
+          hour,
           timeOfDay: usePetStore.getState().timeOfDay,
           minutesSinceHumanTouch: recentTouchMinutes,
           memoryCount,
@@ -125,6 +161,8 @@ export function usePetProactivity({
           newsItems,
           smartSuggestions,
           recentUserMessages: messages,
+          chatterEnabled: chatterAllowed,
+          chatterKind: chatterAllowed ? pickChatterKind(hour, hotTopics.length > 0) : undefined,
           blocked: {
             news: !newsAllowed,
             activity: isCooldownActive(cooldowns, "activity", ACTIVITY_COOLDOWN_MS),
@@ -137,6 +175,18 @@ export function usePetProactivity({
         if (!plan) return;
 
         localStorage.setItem(LAST_RUN_KEY, Date.now().toString());
+
+        if (plan.kind === "chatter") {
+          // 先记冷却：模型出错时也别每两分钟重试一次
+          markCooldown(cooldownsRef.current, "chatter");
+          localStorage.setItem(LAST_CHATTER_KIND_KEY, plan.topic);
+          const chatter = await generateChatter(plan.topic, hotTopics);
+          if (!chatter || disposed || shouldPauseMotion()) return;
+          addMessage({ role: "assistant", content: chatter.detail });
+          const pose = chatter.kind === "joke" ? "dance" : chatter.kind === "care" ? "wave" : chatter.kind === "hot" ? "excited" : "look";
+          speak(chatter.bubble, 9000, pose);
+          return;
+        }
 
         if (plan.kind === "news") {
           markCooldown(cooldownsRef.current, "news");
@@ -205,8 +255,8 @@ export function usePetProactivity({
       }
     };
 
-    // 间隔要大于 MIN_RUN_INTERVAL_MS，否则每隔一轮就会被最小间隔挡掉。
-    const timer = window.setInterval(run, MIN_RUN_INTERVAL_MS + 60_000);
+    // 每两分钟看一次；真正的间隔由 minInterval 和各类冷却控制。
+    const timer = window.setInterval(run, CHECK_INTERVAL_MS);
     const startup = window.setTimeout(run, 12_000);
 
     return () => {
@@ -214,5 +264,5 @@ export function usePetProactivity({
       window.clearInterval(timer);
       window.clearTimeout(startup);
     };
-  }, [autonomousLearning, autonomousNews, autoAction, enableInteractions, lastHumanTouchRef]);
+  }, [autonomousLearning, autonomousNews, autoAction, enableInteractions, interactionFrequency, lastHumanTouchRef]);
 }

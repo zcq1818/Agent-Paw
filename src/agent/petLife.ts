@@ -33,42 +33,7 @@ export function dayKey(date = new Date()) {
 
 // ───────────────────────── 专注 + 成长 ─────────────────────────
 
-export const LEVELS = [
-  { min: 0, title: "刚来的小助手" },
-  { min: 60, title: "有点靠谱" },
-  { min: 180, title: "专注搭子" },
-  { min: 400, title: "效率伙伴" },
-  { min: 800, title: "深度工作者" },
-  { min: 1500, title: "心流大师" },
-  { min: 2500, title: "时间管理大师" },
-  { min: 4000, title: "传说中的搭子" },
-];
-
-/** 专注时长随等级解锁 */
-export const FOCUS_OPTIONS = [
-  { minutes: 25, level: 1 },
-  { minutes: 45, level: 2 },
-  { minutes: 60, level: 3 },
-];
-
-export function levelOf(totalMin: number) {
-  let index = 0;
-  LEVELS.forEach((item, i) => {
-    if (totalMin >= item.min) index = i;
-  });
-  const next = LEVELS[index + 1];
-  return {
-    level: index + 1,
-    title: LEVELS[index].title,
-    next: next ? { level: index + 2, title: next.title, need: next.min - totalMin, progress: (totalMin - LEVELS[index].min) / (next.min - LEVELS[index].min) } : null,
-  };
-}
-
-/** 某个等级解锁了什么（升级时告诉用户） */
-export function unlocksAt(level: number) {
-  const items = FOCUS_OPTIONS.filter((option) => option.level === level).map((option) => `${option.minutes} 分钟专注`);
-  return [`称号「${LEVELS[level - 1]?.title}」`, ...items];
-}
+// 等级、称号、专注解锁都在 bond.ts（陪伴成长）；这里只管专注计时和按天的专注分钟数。
 
 interface FocusSession {
   startedAt: number;
@@ -86,8 +51,8 @@ interface GrowthData {
 interface GrowthStore extends GrowthData {
   startFocus: (minutes: number) => void;
   cancelFocus: () => void;
-  /** 专注完成：记分钟数，返回是否升级 */
-  finishFocus: () => { minutes: number; leveledUp: boolean; level: number } | null;
+  /** 专注完成：记分钟数（成长经验由 bond.ts 加） */
+  finishFocus: () => { minutes: number } | null;
 }
 
 const GROWTH_KEY = "paw_growth";
@@ -114,30 +79,15 @@ export const useGrowthStore = create<GrowthStore>((set, get) => ({
   finishFocus: () => {
     const { focus, totalFocusMin, days, sessions } = get();
     if (!focus) return null;
-    const before = levelOf(totalFocusMin).level;
-    const total = totalFocusMin + focus.minutes;
     const key = dayKey();
-    set({ focus: null, totalFocusMin: total, sessions: sessions + 1, days: { ...days, [key]: (days[key] || 0) + focus.minutes } });
+    set({ focus: null, totalFocusMin: totalFocusMin + focus.minutes, sessions: sessions + 1, days: { ...days, [key]: (days[key] || 0) + focus.minutes } });
     saveGrowth(get());
-    const after = levelOf(total).level;
-    return { minutes: focus.minutes, leveledUp: after > before, level: after };
+    return { minutes: focus.minutes };
   },
 }));
 
 export function todayFocusMinutes() {
   return useGrowthStore.getState().days[dayKey()] || 0;
-}
-
-/** 连续几天专注过（今天还没专注不算断） */
-export function focusStreak(days: Record<string, number>) {
-  let streak = 0;
-  const cursor = new Date();
-  if (!days[dayKey(cursor)]) cursor.setDate(cursor.getDate() - 1);
-  while (days[dayKey(cursor)]) {
-    streak += 1;
-    cursor.setDate(cursor.getDate() - 1);
-  }
-  return streak;
 }
 
 // ───────────────────────── 已连上的服务 ─────────────────────────

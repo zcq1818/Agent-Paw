@@ -19,6 +19,8 @@ import { securityManager } from "./security";
 import { getSkillLibraryTools, skillIndexPrompt, useSkillLibrary } from "./skillLibrary";
 import type { ToolEvent } from "./toolEvents";
 import { BROWSER_USER_AGENT, fetchExternal } from "./http";
+import { bondPrompt } from "./bond";
+import { formatSearchResults, readWebpage, searchWeb } from "./webSearch";
 import {
   defaultProfileName,
   getActiveModelProfile,
@@ -451,6 +453,7 @@ function buildSystemPrompt(): string {
 - 回答简洁有用，不要过度卖萌影响效率。
 - 用户要求你使用工具时，直接执行；完成后用自然语言说明结果。
 - 跟用户说话时不要提工具的英文名（如 timeline_search、mcp_xxx），用大白话说你做了什么、会怎么做。
+- 复杂问题先想清楚再答，先给结论；涉及最新消息、价格、数据等会变的信息，先用 web_search 核实再说，不确定就直说，不要编。
 
 核心能力：
 1. 回答问题、写代码、分析内容。
@@ -471,6 +474,9 @@ Agent 行为准则：
   if (config.enablePersonality !== false) {
     prompt += personalityStore.getPersonalizedContext();
   }
+
+  const bond = bondPrompt();
+  if (bond) prompt += `\n\n${bond}`;
 
   const activeBot = getActiveBot(useBotStore.getState());
   if (activeBot) {
@@ -513,57 +519,15 @@ export interface Tool {
   execute: (args: Record<string, unknown>) => Promise<string>;
 }
 
-type SearchItem = { title: string; link?: string; snippet?: string };
-
-function htmlToText(input: string): string {
-  const doc = new DOMParser().parseFromString(input, "text/html");
-  return (doc.body.textContent || "").replace(/\s+/g, " ").trim();
-}
-
-/** 先用 Bing 的 RSS 搜索（结构化、稳定），失败再退回 DuckDuckGo HTML 版。 */
-async function searchWeb(query: string): Promise<{ items: SearchItem[]; error?: string }> {
-  const headers = { "User-Agent": BROWSER_USER_AGENT, "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8" };
-  let lastError = "";
-
-  try {
-    const resp = await fetchExternal(`https://www.bing.com/search?q=${encodeURIComponent(query)}&format=rss`, { headers });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const doc = new DOMParser().parseFromString(await resp.text(), "text/xml");
-    const items = Array.from(doc.querySelectorAll("item"))
-      .slice(0, 5)
-      .map((item) => ({
-        title: htmlToText(item.querySelector("title")?.textContent || ""),
-        link: item.querySelector("link")?.textContent?.trim() || undefined,
-        snippet: htmlToText(item.querySelector("description")?.textContent || "").slice(0, 160) || undefined,
-      }))
-      .filter((item) => item.title);
-    if (items.length) return { items };
-  } catch (error) {
-    lastError = String(error);
-  }
-
-  try {
-    const resp = await fetchExternal(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, { headers });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const doc = new DOMParser().parseFromString(await resp.text(), "text/html");
-    const items = Array.from(doc.querySelectorAll("a.result__a"))
-      .slice(0, 5)
-      .map((node) => ({ title: (node.textContent || "").trim(), link: node.getAttribute("href") || undefined }))
-      .filter((item) => item.title);
-    return { items };
-  } catch (error) {
-    return { items: [], error: lastError || String(error) };
-  }
-}
-
 const baseTools: Tool[] = [
   {
     name: "web_search",
-    description: "搜索网页获取信息",
+    description:
+      "联网搜索（中文走百度、英文走 Bing），返回标题、链接和摘要。会变的信息（新闻、价格、版本、发布时间、近况、数据）先搜再答。摘要不够时接着用 read_webpage 读正文；结果不对题就换更具体的关键词（加年份、型号、地点）再搜。",
     parameters: {
       type: "object",
       properties: {
-        query: { type: "string", description: "搜索关键词" },
+        query: { type: "string", description: "搜索关键词，具体一点，比如“小米17 Ultra 发布时间 价格”" },
       },
       required: ["query"],
     },
@@ -571,12 +535,28 @@ const baseTools: Tool[] = [
       const query = String(args.query || "").trim();
       if (!query) return "请提供搜索关键词";
       const results = await searchWeb(query);
-      if (results.error) return `搜索失败: ${results.error}`;
-      return results.items.length
-        ? `搜索结果:\n${results.items
-            .map((item, index) => `${index + 1}. ${item.title}${item.link ? ` (${item.link})` : ""}${item.snippet ? `\n   ${item.snippet}` : ""}`)
-            .join("\n")}`
-        : "没有找到相关结果";
+      if (!results.items.length) return results.error ? `搜索失败：${results.error}` : `没有搜到“${query}”的结果，换个关键词试试。`;
+      return formatSearchResults(query, results.items);
+    },
+  },
+  {
+    name: "read_webpage",
+    description: "打开一个网页，读取正文（标题、发布时间、正文文字）。搜索后要看具体内容、或用户发来一个链接让你看时使用。",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "网页地址，http 或 https 开头" },
+      },
+      required: ["url"],
+    },
+    execute: async (args) => {
+      const url = String(args.url || "").trim();
+      if (!url) return "请提供网址";
+      try {
+        return await readWebpage(url);
+      } catch (error) {
+        return `打开网页失败：${error}`;
+      }
     },
   },
   {
@@ -874,7 +854,7 @@ export async function streamChat(
   let shouldSendTools = config.enableTools !== false;
   let fullText = "";
   // 操作电脑往往要“看界面 → 点 → 再看”很多步，开启电脑控制时放宽工具轮次。
-  let maxRounds = config.computerControl !== "off" ? 24 : 6;
+  let maxRounds = config.computerControl !== "off" ? 24 : 10;
   let ranOutOfRounds = true;
   let hitLengthLimit = false;
 
@@ -1109,7 +1089,7 @@ export async function streamChat(
   }
 
   if (ranOutOfRounds && !fullText.trim()) {
-    // 连续 5 轮都只在调工具、没有给出文字回复，避免最后落一条空消息。
+    // 工具轮次用完都只在调工具、没有给出文字回复，避免最后落一条空消息。
     const note = "（工具调用轮次已用完，模型没有给出最终答复。可以换个问法或让我继续。）";
     fullText = note;
     onChunk(note);

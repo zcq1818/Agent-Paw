@@ -74,6 +74,7 @@ export function reduceToolRuns(runs: ToolRun[], event: ToolEvent): ToolRun[] {
 const TOOL_ACTIONS: Record<string, string> = {
   get_weather: "查天气",
   web_search: "上网搜索",
+  read_webpage: "读网页",
   get_today_news: "看今天的新闻",
   get_time: "看时间",
   calculate: "算一下",

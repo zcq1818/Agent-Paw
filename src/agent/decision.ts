@@ -1,5 +1,6 @@
 import type { SmartSuggestion } from "./personality";
 import type { NewsItem } from "./news";
+import type { ChatterKind } from "./chatter";
 
 export interface ProactiveContext {
   hour: number;
@@ -13,6 +14,10 @@ export interface ProactiveContext {
   newsItems: NewsItem[];
   smartSuggestions: SmartSuggestion[];
   recentUserMessages: string[];
+  /** 可以主动搭话（开了主动互动、模型可用） */
+  chatterEnabled?: boolean;
+  /** 这次搭话聊什么（已经按时间、热搜、上次聊过的类型选好） */
+  chatterKind?: ChatterKind;
   /** 处于冷却期（或已无意义，如 Skill 已存在）的计划类型，选择时直接跳过。 */
   blocked?: Partial<Record<ProactivePlan["kind"], boolean>>;
 }
@@ -45,6 +50,11 @@ export type ProactivePlan =
       kind: "memory";
       priority: number;
       message: string;
+    }
+  | {
+      kind: "chatter";
+      priority: number;
+      topic: ChatterKind;
     };
 
 function countMatches(messages: string[], pattern: RegExp) {
@@ -88,6 +98,15 @@ export function selectProactivePlan(context: ProactiveContext): ProactivePlan | 
       kind: "memory",
       priority: 35,
       message: "我还在慢慢认识你的偏好和习惯，等你多说一点，我会记得更准。",
+    });
+  }
+
+  // 主动搭话：讲笑话、聊热搜、冷知识、关心一句。优先级带一点随机，和建议、活动摘要轮着来。
+  if (context.chatterEnabled && context.chatterKind && context.minutesSinceHumanTouch > 2) {
+    plans.push({
+      kind: "chatter",
+      priority: 54 + Math.random() * 12,
+      topic: context.chatterKind,
     });
   }
 

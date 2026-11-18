@@ -837,7 +837,7 @@ export function Settings({ onBack, onOpenSidebar, initialSection }: SettingsProp
                 <SettingRow title="避开鼠标" description="走动时躲开你的鼠标。">
                   <Switch label="避开鼠标" checked={avoidCursor} onChange={live(setAvoidCursorLocal, setAvoidCursor)} />
                 </SettingRow>
-                <SettingRow title="主动互动" description="偶尔说句话、讲个笑话。">
+                <SettingRow title="主动互动" description="主动讲笑话、聊热搜、说冷知识、关心你一句（用你配的模型现编）。频率越高说得越勤。">
                   <Switch label="主动互动" checked={enableInteractions} onChange={live(setEnableInteractionsLocal, setEnableInteractions)} />
                 </SettingRow>
                 {enableInteractions && (
@@ -845,7 +845,7 @@ export function Settings({ onBack, onOpenSidebar, initialSection }: SettingsProp
                     <Segmented value={interactionFrequency} options={FREQUENCY_OPTIONS} onChange={live(setInteractionFrequencyLocal, setInteractionFrequency)} />
                   </SettingRow>
                 )}
-                <SettingRow title="自主新闻播报" description="每天主动整理一次新闻。">
+                <SettingRow title="自主新闻播报" description="每天整理一次新闻；主动搭话时也会挑热搜来聊。">
                   <Switch label="自主新闻播报" checked={autonomousNews} onChange={live(setAutonomousNewsLocal, setAutonomousNews)} />
                 </SettingRow>
                 <SettingRow title="自主学习" description="发现重复需求时自动沉淀为技能。">

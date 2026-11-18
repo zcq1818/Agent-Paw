@@ -19,6 +19,8 @@ import { useAgentStore } from "../store/agent";
 import { useThemeClass } from "../store/theme";
 import { useActivityMonitor, useActivityStore, checkAndDeliverYesterdaySummary } from "../store/activity";
 import { usePetProactivity } from "../agent/proactivity";
+import { chatterAvailable, fetchHotTopics, generateChatter, type ChatterKind } from "../agent/chatter";
+import { BOND_GAIN_EVENT, levelInfo, unlocksAtLevel, useBondStore, type BondSource, type GainResult } from "../agent/bond";
 import { applyTimelineConfig } from "../agent/timeline";
 import { useAutomationRunner, useAutomationStore } from "../agent/automations";
 import { recordOfferFeedback, useInitiative, type Offer } from "../agent/initiative";
@@ -28,7 +30,7 @@ import { toolActionLabel, type ToolRun } from "../agent/toolEvents";
 import { HOTKEY_EVENT } from "../store/shortcut";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { describePaths, type DroppedFile } from "../agent/documents";
-import { focusStreak, muteHint, useAppHints, useDailyWrap, useGrowthStore, buildDailyWrap, wrapPrompt, todayFocusMinutes, unlocksAt, dayKey, type AppHint, type DailyWrap } from "../agent/petLife";
+import { muteHint, useAppHints, useDailyWrap, useGrowthStore, buildDailyWrap, wrapPrompt, todayFocusMinutes, dayKey, type AppHint, type DailyWrap } from "../agent/petLife";
 import { DropCard, FocusBadge, GrowthMenuHeader, HintCard, UpdateCard, WrapCard, type DropChoice } from "./PetCards";
 import { installUpdate, skipVersion, useUpdateCheck, type UpdateInfo } from "../agent/updater";
 import { useBotStore, type BotRole } from "../store/bots";
@@ -307,7 +309,6 @@ export function Pet() {
   const [wrap, setWrap] = useState<DailyWrap | null>(null);
   const [hint, setHint] = useState<AppHint | null>(null);
   const focus = useGrowthStore((state) => state.focus);
-  const growthTotal = useGrowthStore((state) => state.totalFocusMin);
   const growthDays = useGrowthStore((state) => state.days);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [updateProgress, setUpdateProgress] = useState<number | null>(null);
@@ -410,6 +411,64 @@ export function Pet() {
     [adjustLife, resetToDefaultState, setEmotion]
   );
 
+  /** 加成长经验；升级时跳个舞、告诉你解锁了什么 */
+  const gainBond = useCallback(
+    (source: BondSource, amount?: number): GainResult => {
+      const result = useBondStore.getState().gain(source, amount);
+      if (result.leveledUp) {
+        const info = levelInfo(useBondStore.getState().xp);
+        // 称号已经在前半句说了，解锁列表里不再重复
+        const unlocks = unlocksAtLevel(result.level).filter((item) => !item.startsWith("称号"));
+        const line = `升级啦！现在是 Lv${result.level}「${info.title}」${unlocks.length ? `，解锁了${unlocks.join("、")}` : ""}。谢谢你一直陪着我～`;
+        window.setTimeout(() => {
+          speak(`🎉 ${line}`, 9000, "dance");
+          addMessage({ role: "assistant", content: `## 🎉 升到 Lv${result.level} 啦\n\n${line}\n\n右键我可以看成长进度。` });
+        }, 600);
+      }
+      return result;
+    },
+    [addMessage, speak]
+  );
+  const gainBondRef = useRef(gainBond);
+  gainBondRef.current = gainBond;
+
+  // 成长：每天第一次见面签到；有人在电脑前就算陪伴时间；别的窗口发消息也记聊天经验
+  useEffect(() => {
+    const checkIn = window.setTimeout(() => {
+      const checked = useBondStore.getState().checkIn();
+      if (!checked) return;
+      const result = gainBondRef.current("signin", checked.bonus);
+      if (checked.streak > 1 && !result.leveledUp) {
+        speakRef.current(`连续第 ${checked.streak} 天见面啦，签到成长 +${result.gained}，今天也一起加油！`, 6000);
+      }
+    }, 6000);
+    const presence = window.setInterval(async () => {
+      try {
+        const idle = await invoke<number>("user_idle_seconds");
+        if (idle < 300 && !isQuietNow(quietHoursEnabled, quietStart, quietEnd)) gainBondRef.current("presence");
+      } catch {
+        // 浏览器预览
+      }
+    }, 5 * 60_000);
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    listen<{ source?: BondSource; amount?: number }>(BOND_GAIN_EVENT, (event) => {
+      const source = event.payload?.source;
+      if (source) gainBondRef.current(source, event.payload?.amount);
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      window.clearTimeout(checkIn);
+      window.clearInterval(presence);
+      unlisten?.();
+    };
+  }, [quietEnd, quietHoursEnabled, quietStart]);
+
   useActivityMonitor();
 
   // Deliver yesterday's activity summary on first launch of the day
@@ -428,6 +487,7 @@ export function Pet() {
     autonomousLearning,
     enableInteractions,
     autoAction,
+    interactionFrequency,
   });
 
   const moveTo = useCallback(
@@ -599,6 +659,9 @@ export function Pet() {
   const triggerRandomInteraction = useCallback((force = false) => {
     if (!enableInteractions || (!force && shouldPauseMotion())) return;
     if (Date.now() - lastHumanTouchRef.current < 15_000) return;
+    // 刚说过话就别再插一句；模型能用时主要靠它现编的搭话，写死的提醒偶尔说一句就好。
+    if (!force && Date.now() - lastSpokenRef.current < 3 * 60_000) return;
+    if (!force && chatterAvailable() && Math.random() < 0.85) return;
     const interaction = getRandomInteraction();
     adjustLife({ affection: 1, curiosity: -1 });
     speak(`${interaction.emoji} ${interaction.message}`);
@@ -681,6 +744,33 @@ export function Pet() {
     resizePetWindow(false);
     resetToDefaultState();
   }, [pauseMotion, resetToDefaultState]);
+
+  // 聊天框开着时点了别的地方（桌宠窗口失去焦点）就自动收起；回复没写完也没关系，写完会用气泡告诉你。
+  useEffect(() => {
+    if (!showMiniChat) return;
+    const openedAt = Date.now();
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    try {
+      getCurrentWindow()
+        .onFocusChanged(({ payload: focused }) => {
+          // 刚打开时窗口还在调整大小，焦点可能抖一下；拖角改大小时也别收
+          if (focused || Date.now() - openedAt < 800 || resizeRef.current) return;
+          closeMiniChat();
+        })
+        .then((fn) => {
+          if (disposed) fn();
+          else unlisten = fn;
+        })
+        .catch(() => {});
+    } catch {
+      // Browser dev fallback.
+    }
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [showMiniChat, closeMiniChat]);
 
   // ── 拖角调整聊天框大小 ──
   // 宠物窗口本身不可缩放（透明无边框），这里自己算：按住角上的把手拖动，按鼠标位移改窗口大小；
@@ -1078,10 +1168,10 @@ export function Pet() {
       if (!result) return;
       setPetState("dance");
       const today = todayFocusMinutes();
-      if (result.leveledUp) {
-        speak(`专注 ${result.minutes} 分钟完成！升到 Lv${result.level} 啦，解锁了${unlocksAt(result.level).join("、")}。`, 9000, "dance");
-      } else {
-        speak(`专注 ${result.minutes} 分钟完成！今天一共 ${today} 分钟，起来活动 5 分钟吧。`, 7000, "dance");
+      // 专注 1 分钟 +1 经验，再奖励 5 点；升级的话 gainBond 会自己庆祝
+      const gained = gainBondRef.current("focus", result.minutes + 5);
+      if (!gained.leveledUp) {
+        speak(`专注 ${result.minutes} 分钟完成！成长 +${gained.gained}，今天一共专注 ${today} 分钟，起来活动 5 分钟吧。`, 7000, "dance");
       }
       window.setTimeout(resetToDefaultState, 4200);
     };
@@ -1450,8 +1540,34 @@ export function Pet() {
     setShowMenu(false);
     const interaction = Math.random() < 0.45 ? getInteractionByType("tip") : getInteractionByType("joke");
     adjustLife({ affection: 3, energy: -0.5, curiosity: -1 });
+    gainBond("interact");
     speak(`${interaction.emoji} ${interaction.message}`);
-  }, [adjustLife, isDragging, markHumanTouch, pauseMotion, speak]);
+  }, [adjustLife, gainBond, isDragging, markHumanTouch, pauseMotion, speak]);
+
+  /** 右键菜单里的“讲个笑话 / 聊聊热搜”：马上让模型现编一条。 */
+  const chatNow = useCallback(
+    async (kind: ChatterKind) => {
+      markHumanTouch();
+      if (!chatterAvailable()) {
+        speak("先在 设置 → 模型 里填好模型，我才能现编笑话和聊热搜哦。", 6000, "look");
+        return;
+      }
+      speak(kind === "hot" ? "我去看看现在都在聊啥…" : "让我想想…", 3000, "thinking");
+      const hot = kind === "hot" ? await fetchHotTopics() : [];
+      if (kind === "hot" && hot.length === 0) {
+        speak("热搜暂时没拉到，等会儿再试试。", 4500, "look");
+        return;
+      }
+      const chatter = await generateChatter(kind, hot);
+      if (!chatter) {
+        speak("脑子卡了一下，再点我一次试试。", 4000, "look");
+        return;
+      }
+      addMessage({ role: "assistant", content: chatter.detail });
+      speak(chatter.bubble, 9000, kind === "joke" ? "dance" : "excited");
+    },
+    [addMessage, markHumanTouch, speak]
+  );
 
   const cycleAvatar = useCallback(async () => {
     const options = [...(await loadCustomAvatars()), ...BUILTIN_AVATARS];
@@ -1466,28 +1582,31 @@ export function Pet() {
     markHumanTouch();
     pauseMotion(2800);
     adjustLife({ energy: 18, affection: 2, curiosity: -1 });
+    gainBond("interact", 2);
     setPetState("excited");
     speak("谢谢你，我补到能量了。", 4200);
     window.setTimeout(resetToDefaultState, 2600);
-  }, [adjustLife, markHumanTouch, pauseMotion, resetToDefaultState, speak]);
+  }, [adjustLife, gainBond, markHumanTouch, pauseMotion, resetToDefaultState, speak]);
 
   const trainPet = useCallback(() => {
     markHumanTouch();
     pauseMotion(3200);
     adjustLife({ curiosity: 10, energy: -7, affection: 1 });
+    gainBond("interact", 2);
     setPetState("thinking");
     speak("我记住了一点新东西。", 4200);
     window.setTimeout(resetToDefaultState, 3000);
-  }, [adjustLife, markHumanTouch, pauseMotion, resetToDefaultState, speak]);
+  }, [adjustLife, gainBond, markHumanTouch, pauseMotion, resetToDefaultState, speak]);
 
   const playWithPet = useCallback(() => {
     markHumanTouch();
     pauseMotion(2800);
     adjustLife({ affection: 4, energy: -4, curiosity: 1 });
+    gainBond("interact", 2);
     setPetState("dance");
     speak("再来一次，我喜欢这个。", 4200);
     window.setTimeout(resetToDefaultState, 2800);
-  }, [adjustLife, markHumanTouch, pauseMotion, resetToDefaultState, speak]);
+  }, [adjustLife, gainBond, markHumanTouch, pauseMotion, resetToDefaultState, speak]);
 
   const broadcastTodayNews = useCallback(async () => {
     setPetState("thinking");
@@ -1792,9 +1911,7 @@ export function Pet() {
           style={{ left: menuLeft, top: menuTop, maxHeight: `calc(100vh - ${menuTop + 8}px)` }}
         >
           <GrowthMenuHeader
-            totalMin={growthTotal}
             todayMin={growthDays[dayKey()] || 0}
-            streak={focusStreak(growthDays)}
             focusing={Boolean(focus)}
             onFocus={startFocus}
           />
@@ -1814,8 +1931,10 @@ export function Pet() {
           <MenuItem label="训练" onClick={() => { setShowMenu(false); trainPet(); }} />
           <MenuItem label="陪玩" onClick={() => { setShowMenu(false); playWithPet(); }} />
           <MenuItem label="今日新闻" onClick={() => { setShowMenu(false); broadcastTodayNews(); }} />
-          <MenuItem label="说句话" onClick={() => { setShowMenu(false); triggerRandomInteraction(true); }} />
-          <MenuItem label="摸摸头" onClick={() => { setShowMenu(false); speak("皮卡皮卡~ 好舒服，我会更努力陪你。"); }} />
+          <MenuItem label="讲个笑话" onClick={() => { setShowMenu(false); void chatNow("joke"); }} />
+          <MenuItem label="聊聊热搜" onClick={() => { setShowMenu(false); void chatNow("hot"); }} />
+          <MenuItem label="冷知识" onClick={() => { setShowMenu(false); void chatNow("fact"); }} />
+          <MenuItem label="摸摸头" onClick={() => { setShowMenu(false); gainBond("interact"); speak("皮卡皮卡~ 好舒服，我会更努力陪你。"); }} />
           <div className="my-1 border-t border-line" />
           <MenuItem label="设置" onClick={() => { setShowMenu(false); showMainWindow("settings"); }} />
         </div>

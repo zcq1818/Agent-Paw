@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { FileText, Folder, Image as ImageIcon, Lock, X } from "lucide-react";
 import { dropKindOf, formatSize, isCodeFile, type DroppedFile } from "../agent/documents";
-import { FOCUS_OPTIONS, connectorReady, levelOf, type AppHint, type DailyWrap } from "../agent/petLife";
+import { connectorReady, type AppHint, type DailyWrap } from "../agent/petLife";
+import { FOCUS_UNLOCKS, SOURCE_LABELS, daysSince, levelInfo, useBondStore, type BondSource } from "../agent/bond";
 import { useBotStore, type BotRole } from "../store/bots";
 import { BotAvatar } from "./BotAvatar";
 import { formatDur } from "../agent/timeline";
@@ -251,36 +252,56 @@ export function FocusBadge({ endsAt, minutes, onCancel }: { endsAt: number; minu
   );
 }
 
-/** 右键菜单顶部：等级、进度、专注按钮 */
+/** 右键菜单顶部：成长等级、经验进度、今天的经验、专注按钮 */
 export function GrowthMenuHeader({
-  totalMin,
   todayMin,
-  streak,
   focusing,
   onFocus,
 }: {
-  totalMin: number;
   todayMin: number;
-  streak: number;
   focusing: boolean;
   onFocus: (minutes: number) => void;
 }) {
-  const info = levelOf(totalMin);
+  const xp = useBondStore((state) => state.xp);
+  const since = useBondStore((state) => state.since);
+  const streak = useBondStore((state) => state.streak);
+  const today = useBondStore((state) => state.today);
+  const info = levelInfo(xp);
+  const todayParts = (Object.keys(SOURCE_LABELS) as BondSource[])
+    .map((source) => ({ label: SOURCE_LABELS[source], value: today[source] || 0 }))
+    .filter((part) => part.value > 0);
+  const todayTotal = todayParts.reduce((sum, part) => sum + part.value, 0);
   return (
     <div className="border-b border-line px-3 pb-2.5 pt-2">
       <div className="flex items-baseline gap-1.5">
         <span className="text-xs font-semibold text-primary-ink">Lv{info.level}</span>
         <span className="truncate text-xs text-fg">{info.title}</span>
       </div>
-      <div className="mt-1 h-1 overflow-hidden rounded-full bg-surface-2" title={info.next ? `再专注 ${info.next.need} 分钟升到 Lv${info.next.level}` : "满级了"}>
-        <div className="h-full rounded-full bg-primary" style={{ width: `${Math.round((info.next?.progress ?? 1) * 100)}%` }} />
+      <div
+        className="mt-1 h-1 overflow-hidden rounded-full bg-surface-2"
+        title={info.toNext ? `再 ${info.toNext} 点成长升到 Lv${info.level + 1}` : "满级了"}
+      >
+        <div className="h-full rounded-full bg-primary" style={{ width: `${Math.round(info.progress * 100)}%` }} />
       </div>
-      <div className="mt-1 text-[10px] text-fg-muted">
-        今天专注 {todayMin} 分钟{streak > 1 ? ` · 连续 ${streak} 天` : ""}
+      <div className="mt-1 flex justify-between text-[10px] text-fg-muted tabular-nums">
+        <span>
+          {info.toNext ? `${info.current}/${info.needed}` : "满级"}
+        </span>
+        <span>
+          认识 {daysSince(since)} 天{streak > 1 ? ` · 连续 ${streak} 天` : ""}
+        </span>
+      </div>
+      <div
+        className="mt-0.5 text-[10px] text-fg-muted"
+        title="成长来源：陪伴（电脑前每 5 分钟 +2）、聊天（每条 +3）、互动、专注（每分钟 +1）、每日签到"
+      >
+        今天 +{todayTotal}
+        {todayParts.length > 0 && `（${todayParts.map((part) => `${part.label} ${part.value}`).join(" · ")}）`}
+        {todayMin > 0 && ` · 专注 ${todayMin} 分钟`}
       </div>
       {!focusing && (
         <div className="mt-2 flex gap-1">
-          {FOCUS_OPTIONS.map((option) => {
+          {FOCUS_UNLOCKS.map((option) => {
             const locked = info.level < option.level;
             return (
               <button
@@ -288,7 +309,7 @@ export function GrowthMenuHeader({
                 type="button"
                 disabled={locked}
                 onClick={() => onFocus(option.minutes)}
-                title={locked ? `Lv${option.level} 解锁` : `陪你专注 ${option.minutes} 分钟`}
+                title={locked ? `Lv${option.level} 解锁` : `陪你专注 ${option.minutes} 分钟（每分钟 +1 成长）`}
                 className="flex flex-1 items-center justify-center gap-0.5 rounded-md border border-line py-1 text-[11px] text-fg transition enabled:hover:border-primary/60 enabled:hover:bg-primary/5 disabled:text-fg-muted/60"
               >
                 {locked && <Lock size={9} />}

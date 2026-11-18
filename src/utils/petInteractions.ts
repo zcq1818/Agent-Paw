@@ -64,8 +64,9 @@ export function getTimeBasedGreeting(): Interaction {
   return pick(EVENING_GREETINGS);
 }
 
+/** 随机小提醒。真正的笑话、热点由模型现编（agent/chatter.ts），这里只留写死也不尴尬的提醒和小建议。 */
 export function getRandomInteraction(): Interaction {
-  return pick([...REMINDERS, ...JOKES, ...TIPS, ...NEWS]);
+  return pick([...REMINDERS, ...TIPS]);
 }
 
 export function getInteractionByType(type: InteractionType): Interaction {

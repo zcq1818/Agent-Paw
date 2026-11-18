@@ -2,6 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { create } from "zustand";
 import { customSkillsStore, type CustomSkill } from "./customSkills";
 import type { Tool } from "./tools";
+import { installBuiltinSkills } from "./builtinSkills";
+
+let builtinChecked = false;
 
 /**
  * 技能库：把两种技能合在一起给模型用。
@@ -125,6 +128,11 @@ export const useSkillLibrary = create<LibraryState>((set, get) => ({
     set({ loading: true, error: "" });
     try {
       const pawDir: string = await invoke("skills_root");
+      if (!builtinChecked) {
+        builtinChecked = true;
+        const existing = await invoke<Array<{ content: string }>>("skills_scan", { roots: [pawDir] }).catch(() => []);
+        await installBuiltinSkills(existing.map((item) => parseSkillMarkdown(item.content).meta.name || ""));
+      }
       const sources = loadSkillSources();
       const roots: Array<{ path: string; source: LibrarySkill["source"] }> = [{ path: pawDir, source: "paw" }];
       if (sources.claude) roots.push({ path: CLAUDE_SKILLS_DIR, source: "claude" });

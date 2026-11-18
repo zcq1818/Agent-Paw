@@ -4,10 +4,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { useChatStore } from "./chat";
 import { streamChat } from "../agent/kernel";
 import { memoryStore, type MemoryType } from "../agent/memory";
-import { customSkillsStore } from "../agent/customSkills";
 import { createHelpSurface, createSystemSurface, createTaskSurface, type SurfaceSpec } from "../agent/surfaces";
-import { fetchTodayNews, formatNewsMarkdown, markTodayNewsPushed, shouldPushTodayNews } from "../agent/news";
 import { useActivityStore } from "./activity";
+import { BOND_GAIN_EVENT } from "../agent/bond";
 import { reduceToolRuns, subscribeToolEvents, type ToolEvent, type ToolRun } from "../agent/toolEvents";
 import { confirmSystemAction } from "../agent/tools";
 import { getActiveBotId } from "../agent/scope";
@@ -32,6 +31,33 @@ let activeController: AbortController | null = null;
 
 /** 发给模型的历史条数上限；不设上限时长对话会超出上下文窗口直接报错。 */
 const MAX_HISTORY_MESSAGES = 40;
+/** 最近几条带工具调用的回复，把工具结果摘要一起放进历史 */
+const TOOL_CONTEXT_REPLIES = 3;
+const TOOL_CONTEXT_CHARS = 2400;
+/** 这些工具的结果很长、需要时可以重新读，只记一笔调用过 */
+const BRIEF_RESULT_TOOLS = new Set(["use_skill", "read_skill_file"]);
+
+function toolContext(runs?: ToolRun[]): string {
+  const useful = (runs || []).filter((run) => run.name !== "审批" && run.result);
+  if (useful.length === 0) return "";
+  let budget = TOOL_CONTEXT_CHARS;
+  const lines: string[] = [];
+  for (const run of useful) {
+    if (budget <= 0) break;
+    let args = "";
+    try {
+      args = JSON.stringify(JSON.parse(run.args || "{}"));
+    } catch {
+      args = run.args || "";
+    }
+    const result = BRIEF_RESULT_TOOLS.has(run.name)
+      ? "（已读取）"
+      : (run.result || "").replace(/\s+/g, " ").slice(0, Math.min(1200, budget));
+    budget -= result.length;
+    lines.push(`- ${run.name} ${args.slice(0, 200)} → ${result}`);
+  }
+  return `\n\n<tool_history>\n（这条回复调用过的工具和结果摘要，用户看不到；接着聊时直接引用，不用重复搜索）\n${lines.join("\n")}\n</tool_history>`;
+}
 
 /** 发给桌宠气泡的摘要：保留 Markdown，表格 / 代码换成提示，按行截断。 */
 function summarizeForBubble(text: string) {
@@ -129,21 +155,6 @@ function createLocalSurface(text: string): { content: string; surface: SurfaceSp
   return null;
 }
 
-function isAcknowledgementResponse(text: string) {
-  const cleaned = text.trim().replace(/\s+/g, "");
-  return /^(好的|收到|可以|行|没问题|ok|okay|好呀|好的，|好的。|收到，|收到。)$/i.test(cleaned) || cleaned.length <= 14 && /^(好的|收到|可以|行|没问题)/.test(cleaned);
-}
-
-async function maybePushTodayNews(addMessage: (message: { role: "assistant"; content: string }) => void, trigger: "ok" | "greeting") {
-  if (!shouldPushTodayNews(trigger)) return;
-  const items = await fetchTodayNews();
-  if (items.length === 0) return;
-  const content = formatNewsMarkdown(items);
-  addMessage({ role: "assistant", content });
-  markTodayNewsPushed(trigger);
-  notifyPet("pet-say", { message: summarizeForBubble("我给你带来今天新闻速览。") });
-}
-
 function extractExplicitMemory(text: string): string | null {
   const patterns = [
     /^(?:请|帮我|皮卡)?\s*(?:记住|记一下|记下)[:：,，\s]\s*(.+)$/is,
@@ -191,38 +202,6 @@ async function tryHandleMemoryCommand(text: string): Promise<string | null> {
   return null;
 }
 
-async function tryHandleSkillCommand(text: string): Promise<string | null> {
-  if (/^(列出|查看|看看)?\s*(你的|当前的?)?(自定义)?\s*(skill|技能)(列表)?[?？]*$|^(你)?有哪些(自定义)?\s*(skill|技能)[?？]*$/i.test(text.trim())) {
-    const skills = customSkillsStore.getAll();
-    if (skills.length === 0) return "现在还没有自定义 Skill。你可以说“帮你自己创建一个 xxx 技能，用来……”。";
-    return `当前自定义 Skill：\n${skills.map((skill) => `- ${skill.active ? "启用" : "停用"} ${skill.name}: ${skill.description}`).join("\n")}`;
-  }
-
-  // 必须以“(帮你自己/给自己)创建…技能”开头，避免“生成一个 Python 技能学习计划”之类误触发。
-  if (!/^(?:请|帮我|帮你自己|给你自己|给自己|你)?\s*(?:创建|新建|写一个|做一个)/i.test(text.trim())) return null;
-  const createMatch = text.match(/(?:创建|新建|写一个|做一个|生成).{0,8}(?:skill|技能).{0,8}(?:叫|名为|名称是)?\s*([^，。,.：:]+)?[，。,.：:]?\s*(?:用来|用于|可以|能够|功能是|作用是)?\s*(.*)$/i);
-  if (!createMatch || !/(skill|技能)/i.test(text)) return null;
-
-  const rawName = (createMatch[1] || "").trim();
-  const rawGoal = (createMatch[2] || "").trim();
-  const name = rawName && rawName.length <= 24 ? rawName : `自定义技能 ${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`;
-  const description = rawGoal || text.replace(/创建|新建|写一个|做一个|生成|skill|技能/gi, "").trim() || "按用户指定流程完成任务";
-  const skill = customSkillsStore.create({
-    name,
-    description,
-    category: "其他",
-    instructions: [
-      `当用户请求“${description}”相关任务时，先澄清目标和输入。`,
-      "给出可执行步骤，必要时调用已有工具完成任务。",
-      "输出结果时保持简洁，并说明已经完成了什么。",
-    ].join("\n"),
-    examples: [`帮我${description}`],
-    tags: ["ai-generated", "local"],
-    active: true,
-  });
-  return `我已经给自己创建了 Skill：${skill.name}\n用途：${skill.description}\n之后相关请求会自动带上这个 Skill 的说明。`;
-}
-
 function tryHandleActivityCommand(text: string): string | null {
   if (!/(活动观察|活动监控|活动记录|活动日志|电脑活动|电脑使用|使用情况|我(今天|最近)?(都)?在(电脑上)?(干嘛|做什么|干什么)|用了哪些(应用|软件))/.test(text)) return null;
   const activity = useActivityStore.getState();
@@ -260,6 +239,8 @@ export const useAgentStore = create<AgentState>((set) => ({
     activeController = controller;
     set({ isStreaming: true, streamText: "", error: null, currentToolRuns: [] });
     notifyPet("pet-thinking");
+    // 成长：每条消息记聊天经验（桌宠窗口统一记账）
+    if (!sendOptions?.followUp) notifyPet(BOND_GAIN_EVENT, { source: "chat" });
 
     // 记住发起时的 Bot 和会话：生成期间切换 Bot / 会话，回复也写回原处。
     const target = { botId: getActiveBotId(), conversationId: useChatStore.getState().activeConversationId };
@@ -278,13 +259,18 @@ export const useAgentStore = create<AgentState>((set) => ({
       }
       messages = [...kept, { ...messages[messages.length - 1], role: "user", content: text }];
     }
-    const history = messages
-      .filter((message) => message.content.trim())
-      .slice(-MAX_HISTORY_MESSAGES)
-      .map((message) => ({
-        role: message.role,
-        content: message.content,
-      }));
+    const recent = messages.filter((message) => message.content.trim()).slice(-MAX_HISTORY_MESSAGES);
+    // 最近几条回复用过的工具（搜到了什么、读了哪个网页）一起带上，追问“第二条展开说说”时模型才接得上
+    const withTools = new Set(
+      recent
+        .map((message, index) => (message.role === "assistant" && message.toolRuns?.length ? index : -1))
+        .filter((index) => index >= 0)
+        .slice(-TOOL_CONTEXT_REPLIES)
+    );
+    const history = recent.map((message, index) => ({
+      role: message.role,
+      content: withTools.has(index) ? `${message.content}${toolContext(message.toolRuns)}` : message.content,
+    }));
     let toolRuns: ToolRun[] = [];
     const unsubscribeToolEvents = subscribeToolEvents((event) => {
       toolRuns = reduceToolRuns(toolRuns, event);
@@ -299,16 +285,6 @@ export const useAgentStore = create<AgentState>((set) => ({
         addMessage({ role: "assistant", content: memoryResult });
         set({ streamText: "" });
         notifyPet("pet-say", { message: summarizeForBubble(memoryResult) });
-        return;
-      }
-
-      const skillResult = await tryHandleSkillCommand(text);
-      if (skillResult) {
-        set({ streamText: skillResult });
-        await sleep(160);
-        addMessage({ role: "assistant", content: skillResult });
-        set({ streamText: "" });
-        notifyPet("pet-say", { message: summarizeForBubble(skillResult) });
         return;
       }
 
@@ -357,10 +333,6 @@ export const useAgentStore = create<AgentState>((set) => ({
       addMessage({ role: "assistant", content: fullText, toolRuns });
       set({ streamText: "", currentToolRuns: [] });
       notifyPet("pet-say", { message: summarizeForBubble(fullText) });
-
-      if (isAcknowledgementResponse(fullText) || /新闻|热点|今天有什么|今日新闻/.test(text)) {
-        maybePushTodayNews(addMessage, "ok").catch(() => {});
-      }
     } catch (err: unknown) {
       // Tauri HTTP 插件取消请求时抛出的是字符串 "Request cancelled"，不是 AbortError，
       // 所以以 signal 状态为准判断是不是用户点了停止。

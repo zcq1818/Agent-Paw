@@ -788,6 +788,19 @@ pub struct ClipboardContent {
     files: Vec<String>,
 }
 
+/// 用户多少秒没碰键盘鼠标了（桌宠成长用：有人在电脑前才算陪伴时间）。
+#[tauri::command]
+pub fn user_idle_seconds() -> u64 {
+    #[cfg(windows)]
+    {
+        (sys::idle_ms().max(0) / 1000) as u64
+    }
+    #[cfg(not(windows))]
+    {
+        0
+    }
+}
+
 #[tauri::command]
 pub fn clipboard_read() -> ClipboardContent {
     #[cfg(windows)]
