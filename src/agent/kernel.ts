@@ -21,6 +21,7 @@ import type { ToolEvent } from "./toolEvents";
 import { BROWSER_USER_AGENT, fetchExternal } from "./http";
 import { bondPrompt } from "./bond";
 import { getJobTools } from "./jobs";
+import { SELF_PROMPT, getSelfControlTools } from "./selfControl";
 import { formatSearchResults, readWebpage, searchWeb } from "./webSearch";
 import {
   defaultProfileName,
@@ -501,6 +502,7 @@ Agent 行为准则：
   if (mcpSection) prompt += `\n\n${mcpSection}`;
   prompt +=
     "\n\n## 工作任务\n用户交代一件要很多步、花时间的事（调研整理、批量处理、查资料写报告），或者说“交给你干 / 你自己去做”，用 start_job 交给后台去做，告诉用户你接下了；问进度用 get_jobs。简单的事直接做，不要开任务。";
+  prompt += `\n\n${SELF_PROMPT}`;
   prompt += "\n\n## 自动任务\n用户要求“每天 / 每周 / 工作日 几点帮我做某事”时，用 create_automation 建定时任务，不要只口头答应。";
   prompt +=
     "\n\n## 软件签到\n用户让你去某个软件签到、领积分时，先用 list_app_flows 看有没有现成流程，有就 run_app_flow；要每天自动做，用 create_automation 并填 flow。没有现成流程时，问清楚界面上要依次点哪些文字，再用 create_app_flow 学会它。";
@@ -708,6 +710,7 @@ export function getTools(): Tool[] {
   tools.push(...getDocumentTools());
   tools.push(...getSkillLibraryTools());
   tools.push(...getJobTools());
+  tools.push(...getSelfControlTools());
   tools.push(...getMcpTools());
   return tools;
 }

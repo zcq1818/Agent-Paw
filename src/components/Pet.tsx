@@ -21,6 +21,7 @@ import { useActivityMonitor, useActivityStore, checkAndDeliverYesterdaySummary }
 import { usePetProactivity } from "../agent/proactivity";
 import { chatterAvailable, fetchHotTopics, generateChatter, type ChatterKind } from "../agent/chatter";
 import { jobProgress, reportHeadline, useJobRunner, useJobStore, type Job } from "../agent/jobs";
+import { PET_COMMAND_EVENT, type PetCommandPayload } from "../agent/selfControl";
 import { BOND_GAIN_EVENT, levelInfo, unlocksAtLevel, useBondStore, type BondSource, type GainResult } from "../agent/bond";
 import { applyTimelineConfig } from "../agent/timeline";
 import { useAutomationRunner, useAutomationStore } from "../agent/automations";
@@ -1651,6 +1652,86 @@ export function Pet() {
       speak("新闻源今天有点不给力，我没有拉取成功。");
     }
   }, [addMessage, speak]);
+
+  // 聊天里让桌宠自己动手（paw_pet_action）：别的窗口发事件，这里执行
+  const petCommandRef = useRef<(payload: PetCommandPayload) => void>(() => {});
+  petCommandRef.current = (payload) => {
+    const act = (state: PetState, ms: number) => {
+      setPetState(state);
+      window.setTimeout(resetToDefaultState, ms);
+    };
+    switch (payload.action) {
+      case "focus":
+        startFocus(payload.minutes || 25);
+        break;
+      case "cancel_focus":
+        cancelFocus();
+        break;
+      case "dance":
+        act("dance", 3200);
+        break;
+      case "sit":
+        act("sit", 3600);
+        break;
+      case "sleep":
+        act("sleep", 7000);
+        break;
+      case "stretch":
+        act("stretch", 2800);
+        break;
+      case "excited":
+        setPetState("excited");
+        speak("收到，我精神起来了。");
+        break;
+      case "wander":
+        void wander(true);
+        break;
+      case "come_to_cursor":
+        void reactToCursor(true);
+        break;
+      case "feed":
+        feedPet();
+        break;
+      case "train":
+        trainPet();
+        break;
+      case "play":
+        playWithPet();
+        break;
+      case "joke":
+        void chatNow("joke");
+        break;
+      case "hot_topic":
+        void chatNow("hot");
+        break;
+      case "fact":
+        void chatNow("fact");
+        break;
+      case "news":
+        void broadcastTodayNews();
+        break;
+      case "daily_wrap":
+        void showWrapNow();
+        break;
+      case "squad":
+        void emit("squad-toggle");
+        break;
+    }
+  };
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    listen<PetCommandPayload>(PET_COMMAND_EVENT, (event) => {
+      if (event.payload?.action) petCommandRef.current(event.payload);
+    })
+      .then((fn) => (disposed ? fn() : (unlisten = fn)))
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   const closeBubble = useCallback(() => setBubbleMessage(null), []);
 

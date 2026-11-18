@@ -75,7 +75,7 @@ const DETAIL_CHARS = 1500;
 export const JOB_QUEUED_EVENT = "paw-job-queued";
 export const JOB_FINISHED_EVENT = "paw-job-finished";
 
-function loadJobs(): Job[] {
+export function loadJobs(): Job[] {
   try {
     const value = JSON.parse(localStorage.getItem(JOBS_KEY) || "[]");
     return Array.isArray(value) ? value : [];
