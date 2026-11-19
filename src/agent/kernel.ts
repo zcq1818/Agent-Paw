@@ -86,6 +86,19 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     notes: "OpenAI Chat Completions compatible. Defaults to non-streaming because the official Agnes example returns normal JSON.",
   },
   {
+    id: "tdp-modelgate",
+    label: "TDP ModelGate",
+    baseUrl: "https://ai.tdp.fan/api/v1",
+    model: "",
+    stream: true,
+    enableTools: true,
+    temperature: 0.7,
+    maxTokens: 4096,
+    apiKeyPlaceholder: "sk-gw-...",
+    notes:
+      "TDP 社群共建的模型网关（https://ai.tdp.fan），腾讯云 TDP 成员可免费使用部分高级模型。用法：浏览器打开 ai.tdp.fan，用「TDP 一键登录」进入控制台，在密钥管理里新建一个 sk-gw- 开头的密钥，粘贴到下面的 API Key；模型名填控制台里能看到的模型名。",
+  },
+  {
     id: "openai",
     label: "OpenAI",
     baseUrl: "https://api.openai.com/v1",
