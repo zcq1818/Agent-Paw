@@ -7,6 +7,7 @@ import {
   Briefcase,
   EyeOff,
   Check,
+  GitPullRequest,
   Eye,
   ListTodo,
   MessagesSquare,
@@ -39,10 +40,12 @@ import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { PageHeader, useElementWidth } from "./ui";
 import { McpServersCard } from "./McpSettings";
 import { JobsPanel } from "./JobsPanel";
+import { CnbPanel } from "./CnbPanel";
 
 export type WorkbenchView =
   | "chat"
   | "jobs"
+  | "cnb"
   | "team"
   | "rooms"
   | "chief"
@@ -59,6 +62,7 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ view: WorkbenchView; lab
     title: "协作",
     items: [
       { view: "jobs", label: "工作", icon: <Briefcase size={16} /> },
+      { view: "cnb", label: "CNB 协作", icon: <GitPullRequest size={16} /> },
       { view: "team", label: "团队", icon: <Users size={16} /> },
       { view: "rooms", label: "房间", icon: <MessagesSquare size={16} /> },
       { view: "chief", label: "总管", icon: <Network size={16} /> },
@@ -184,6 +188,9 @@ export function Workbench() {
       break;
     case "jobs":
       content = <JobsPanel onClose={backToChat} />;
+      break;
+    case "cnb":
+      content = <CnbPanel onClose={backToChat} />;
       break;
     case "team":
       content = <BotRoster onClose={backToChat} />;

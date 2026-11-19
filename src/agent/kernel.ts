@@ -21,6 +21,7 @@ import type { ToolEvent } from "./toolEvents";
 import { BROWSER_USER_AGENT, fetchExternal } from "./http";
 import { bondPrompt } from "./bond";
 import { getJobTools } from "./jobs";
+import { getCnbTools } from "./cnb";
 import { SELF_PROMPT, getSelfControlTools } from "./selfControl";
 import { formatSearchResults, readWebpage, searchWeb } from "./webSearch";
 import {
@@ -723,6 +724,7 @@ export function getTools(): Tool[] {
   tools.push(...getDocumentTools());
   tools.push(...getSkillLibraryTools());
   tools.push(...getJobTools());
+  tools.push(...getCnbTools());
   tools.push(...getSelfControlTools());
   tools.push(...getMcpTools());
   return tools;

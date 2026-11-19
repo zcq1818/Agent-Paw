@@ -21,6 +21,7 @@ import { useActivityMonitor, useActivityStore, checkAndDeliverYesterdaySummary }
 import { usePetProactivity } from "../agent/proactivity";
 import { chatterAvailable, fetchHotTopics, generateChatter, type ChatterKind } from "../agent/chatter";
 import { jobProgress, reportHeadline, useJobRunner, useJobStore, type Job } from "../agent/jobs";
+import { useCnbWatcher } from "../agent/cnb";
 import { PET_COMMAND_EVENT, type PetCommandPayload } from "../agent/selfControl";
 import { BOND_GAIN_EVENT, levelInfo, unlocksAtLevel, useBondStore, type BondSource, type GainResult } from "../agent/bond";
 import { applyTimelineConfig } from "../agent/timeline";
@@ -481,6 +482,9 @@ export function Pet() {
       unlisten?.();
     };
   }, [quietEnd, quietHoursEnabled, quietStart]);
+
+  // CNB 协作：每分钟跟进 NPC 开的 PR，开出来就自动审核
+  useCnbWatcher();
 
   // 工作任务：在桌宠窗口里排队执行，开工和干完都说一声
   useJobRunner({
