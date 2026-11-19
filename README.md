@@ -12,7 +12,8 @@
 <p align="center">
   <a href="https://github.com/zcq1818/Agent-Paw/releases/latest"><b>⬇️ 下载 Windows 版</b></a> ·
   <a href="#常见问题">常见问题</a> ·
-  <a href="#开发者指南">参与开发</a>
+  <a href="#开发者指南">参与开发</a> ·
+  <a href="https://cnb.cool/zcq18/Agent-Paw"><b>CNB 镜像仓库</b></a>
 </p>
 
 <p align="center">
