@@ -407,12 +407,36 @@ fn run_local_claude_blocking(
     Ok(stdout)
 }
 
+/// 自动更新插件。Windows 上把“当前程序所在目录”明确交给安装包（NSIS 的 /D=，必须放最后），
+/// 新版本就地覆盖。安装包自己读注册表里记的安装目录不可靠：用户装在 D:\Paw 时，
+/// 更新曾被装进默认的 %LOCALAPPDATA%\Paw，快捷方式打开的还是旧版。
+fn updater_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R, tauri_plugin_updater::Config> {
+    let builder = tauri_plugin_updater::Builder::new();
+    #[cfg(windows)]
+    let builder = match current_install_dir() {
+        Some(dir) => builder.installer_arg(format!("/D={dir}")),
+        None => builder,
+    };
+    builder.build()
+}
+
+#[cfg(windows)]
+fn current_install_dir() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?.to_string_lossy().trim_end_matches('\\').to_string();
+    // /D= 不能带引号；盘符根目录（D:）或空路径不传，交给安装包默认处理
+    if dir.len() <= 2 || dir.contains('"') {
+        return None;
+    }
+    Some(dir)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_http::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(updater_plugin())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
