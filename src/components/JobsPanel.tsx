@@ -1,8 +1,13 @@
 import { useMemo, useState } from "react";
 import {
+  Ban,
   Briefcase,
   Check,
+  CircleAlert,
+  CircleCheck,
   CircleDashed,
+  Clock,
+  FileText,
   Loader2,
   RotateCcw,
   Square,
@@ -10,18 +15,24 @@ import {
   ThumbsUp,
   Trash2,
   X,
+  type LucideIcon,
 } from "lucide-react";
-import { Badge, Button, EmptyState, PageHeader, relativeTime, useElementWidth } from "./ui";
+import { Badge, Button, EmptyState, PageHeader, relativeTime, useElementWidth, type BadgeTone } from "./ui";
 import { MarkdownContent } from "./MarkdownContent";
-import { giveFeedback, jobProgress, reviewJob, useJobStore, useJobSync, type Job, type JobLogEntry, type JobStatus } from "../agent/jobs";
+import { giveFeedback, jobProgress, reportHeadline, reviewJob, useJobStore, useJobSync, type Job, type JobLogEntry, type JobStatus } from "../agent/jobs";
 
-const STATUS: Record<JobStatus, { label: string; tone: "neutral" | "primary" | "accent" | "danger" }> = {
-  queued: { label: "排队中", tone: "neutral" },
-  running: { label: "干活中", tone: "primary" },
-  done: { label: "已完成", tone: "primary" },
-  failed: { label: "没干完", tone: "danger" },
-  cancelled: { label: "已停止", tone: "neutral" },
+const STATUS: Record<JobStatus, { label: string; tone: BadgeTone; icon: LucideIcon; bar: string }> = {
+  running: { label: "进行中", tone: "primary", icon: Loader2, bar: "bg-primary" },
+  queued: { label: "新建", tone: "neutral", icon: Clock, bar: "bg-fg-muted/40" },
+  failed: { label: "失败", tone: "danger", icon: CircleAlert, bar: "bg-danger" },
+  done: { label: "已完成", tone: "success", icon: CircleCheck, bar: "bg-success" },
+  cancelled: { label: "已停止", tone: "neutral", icon: Ban, bar: "bg-fg-muted/30" },
 };
+
+/** 分组顺序：先看在做的，再看待开始和出问题的，最后是做完的 */
+const STATUS_ORDER: JobStatus[] = ["running", "queued", "failed", "done", "cancelled"];
+
+type Filter = "all" | JobStatus;
 
 const EXAMPLES = [
   "调研一下目前主流的 AI 编程助手，对比价格、功能和适合的人群，写一份对比报告",
@@ -47,8 +58,27 @@ export function JobsPanel({ onClose }: { onClose: () => void }) {
   const { ref, width } = useElementWidth<HTMLDivElement>();
   const wide = width >= 700;
 
+  const [filter, setFilter] = useState<Filter>("all");
+
   const selected = jobs.find((job) => job.id === selectedId) || null;
   const active = jobs.filter((job) => job.status === "queued" || job.status === "running").length;
+  const counts = useMemo(() => {
+    const result = { queued: 0, running: 0, done: 0, failed: 0, cancelled: 0 } as Record<JobStatus, number>;
+    for (const job of jobs) result[job.status] += 1;
+    return result;
+  }, [jobs]);
+  const groups = useMemo(
+    () =>
+      STATUS_ORDER.filter((status) => filter === "all" || filter === status)
+        .map((status) => ({
+          status,
+          items: jobs
+            .filter((job) => job.status === status)
+            .sort((a, b) => (b.finishedAt || b.startedAt || b.createdAt) - (a.finishedAt || a.startedAt || a.createdAt)),
+        }))
+        .filter((group) => group.items.length > 0),
+    [jobs, filter]
+  );
 
   const submit = () => {
     const text = goal.trim();
@@ -106,11 +136,46 @@ export function JobsPanel({ onClose }: { onClose: () => void }) {
       {jobs.length === 0 ? (
         <EmptyState icon={<Briefcase size={20} />} title="还没有工作任务" hint="上面写一件事交给它；聊天里说“这个交给你干”也会建任务。" />
       ) : (
-        <div className="space-y-2">
-          {jobs.map((job) => (
-            <JobRow key={job.id} job={job} selected={job.id === selectedId} onSelect={() => setSelectedId(job.id)} />
-          ))}
-        </div>
+        <>
+          <div className="flex flex-wrap gap-1.5">
+            <FilterChip label="全部" count={jobs.length} active={filter === "all"} onClick={() => setFilter("all")} />
+            {STATUS_ORDER.filter((status) => status !== "cancelled" || counts.cancelled > 0).map((status) => (
+              <FilterChip
+                key={status}
+                label={STATUS[status].label}
+                count={counts[status]}
+                bar={STATUS[status].bar}
+                active={filter === status}
+                onClick={() => setFilter(status)}
+              />
+            ))}
+          </div>
+          {groups.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-line px-4 py-6 text-center text-xs text-fg-muted">
+              没有「{filter === "all" ? "全部" : STATUS[filter].label}」的任务
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {groups.map(({ status, items }) => {
+                const Icon = STATUS[status].icon;
+                return (
+                  <section key={status}>
+                    <div className="mb-1.5 flex items-center gap-1.5 px-0.5 text-xs font-semibold text-fg-muted">
+                      <Icon size={13} className={status === "running" ? "animate-spin text-primary" : ""} />
+                      {STATUS[status].label}
+                      <span className="font-normal">{items.length}</span>
+                    </div>
+                    <div className="space-y-2">
+                      {items.map((job) => (
+                        <JobRow key={job.id} job={job} selected={job.id === selectedId} onSelect={() => setSelectedId(job.id)} />
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -144,6 +209,44 @@ export function JobsPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
+function FilterChip({
+  label,
+  count,
+  active,
+  bar,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  bar?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition ${
+        active ? "border-primary bg-primary/10 font-medium text-primary-ink" : "border-line bg-surface text-fg-muted hover:border-primary/40 hover:text-fg"
+      }`}
+    >
+      {bar && <span className={`h-1.5 w-1.5 rounded-full ${bar}`} />}
+      {label}
+      <span className="tabular-nums opacity-70">{count}</span>
+    </button>
+  );
+}
+
+function rowSummary(job: Job) {
+  const progress = jobProgress(job);
+  if (job.status === "running" && progress.current) return `第 ${job.steps.indexOf(progress.current) + 1}/${progress.total} 步：${progress.current.text}`;
+  if (job.status === "running") return "正在列计划…";
+  if (job.status === "queued") return "等前面的活干完就开工";
+  if (job.status === "failed" && job.error) return `出错：${job.error}`;
+  if (job.status === "done") return job.review?.summary || reportHeadline(job.report) || job.goal;
+  return job.goal;
+}
+
 function JobRow({ job, selected, onSelect }: { job: Job; selected: boolean; onSelect: () => void }) {
   const progress = jobProgress(job);
   const status = STATUS[job.status];
@@ -151,27 +254,24 @@ function JobRow({ job, selected, onSelect }: { job: Job; selected: boolean; onSe
     <button
       type="button"
       onClick={onSelect}
-      className={`block w-full rounded-xl border px-3.5 py-3 text-left transition ${
+      className={`relative block w-full overflow-hidden rounded-xl border py-3 pl-4 pr-3.5 text-left transition ${
         selected ? "border-primary/60 bg-primary/5" : "border-line bg-surface hover:border-primary/40"
       }`}
     >
+      <span className={`absolute inset-y-0 left-0 w-1 ${status.bar}`} />
       <div className="flex items-center gap-2">
-        {job.status === "running" && <Loader2 size={13} className="shrink-0 animate-spin text-primary" />}
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg">{job.title}</span>
         <Badge tone={status.tone}>{status.label}</Badge>
       </div>
-      <div className="mt-1 truncate text-xs text-fg-muted">
-        {job.status === "running" && progress.current
-          ? `第 ${job.steps.indexOf(progress.current) + 1}/${progress.total} 步：${progress.current.text}`
-          : job.review?.summary || job.goal}
-      </div>
+      <div className={`mt-1 truncate text-xs ${job.status === "failed" ? "text-danger" : "text-fg-muted"}`}>{rowSummary(job)}</div>
       {progress.total > 0 && job.status === "running" && (
         <div className="mt-2 h-1 overflow-hidden rounded-full bg-surface-2">
           <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }} />
         </div>
       )}
       <div className="mt-1.5 text-[11px] text-fg-muted">
-        {relativeTime(job.createdAt)}
+        {job.finishedAt ? `${relativeTime(job.finishedAt)} 结束` : `${relativeTime(job.createdAt)} 创建`}
+        {job.startedAt && job.status !== "running" ? ` · 用时 ${formatDuration(job)}` : ""}
         {job.source === "chat" ? " · 聊天里交代的" : ""}
         {job.review ? ` · 自评 ${"★".repeat(job.review.score)}` : ""}
       </div>
@@ -288,8 +388,11 @@ function JobDetail({ job, onDeleted, onRetried }: { job: Job; onDeleted: () => v
 
       {job.report && (
         <section className="rounded-xl border border-line bg-surface p-4 shadow-card">
-          <div className="mb-2 text-sm font-semibold text-fg">工作报告</div>
-          <div className="text-sm">
+          <div className="mb-3 flex items-center gap-2 border-b border-line pb-2 text-sm font-semibold text-fg">
+            <FileText size={14} className="text-primary" />
+            工作报告
+          </div>
+          <div className="markdown-body max-w-none break-words">
             <MarkdownContent content={job.report} />
           </div>
         </section>

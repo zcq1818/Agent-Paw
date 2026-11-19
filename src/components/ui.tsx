@@ -213,12 +213,15 @@ export function ChoiceCard({
   );
 }
 
-export function Badge({ tone = "neutral", children }: { tone?: "neutral" | "primary" | "accent" | "danger"; children: ReactNode }) {
+export type BadgeTone = "neutral" | "primary" | "accent" | "danger" | "success";
+
+export function Badge({ tone = "neutral", children }: { tone?: BadgeTone; children: ReactNode }) {
   const tones = {
     neutral: "bg-surface-2 text-fg-muted",
     primary: "bg-primary/15 text-primary-ink",
     accent: "bg-accent/15 text-accent",
     danger: "bg-danger/10 text-danger",
+    success: "bg-success/15 text-success",
   };
   return <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium ${tones[tone]}`}>{children}</span>;
 }
