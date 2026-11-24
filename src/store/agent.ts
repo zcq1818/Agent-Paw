@@ -1,8 +1,10 @@
 import { create } from "zustand";
 import { emit } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { useChatStore } from "./chat";
-import { streamChat } from "../agent/kernel";
+import { useChatStore, type ChatTarget, type Message } from "./chat";
+import { loadConfig, streamChat } from "../agent/kernel";
+import { prepareHistory } from "../agent/compaction";
+import { contextWindowFor, usageKey, useContextUsageStore } from "../agent/contextUsage";
 import { memoryStore, type MemoryType } from "../agent/memory";
 import { createHelpSurface, createSystemSurface, createTaskSurface, type SurfaceSpec } from "../agent/surfaces";
 import { useActivityStore } from "./activity";
@@ -19,6 +21,10 @@ interface AgentState {
   error: string | null;
   /** 本次回复期间实时累积的工具调用，供流式气泡展示。 */
   currentToolRuns: ToolRun[];
+  /** 正在把前面的对话压缩成摘要 */
+  compacting: boolean;
+  /** 手动压缩当前对话（保留最近几条），返回给用户看的结果 */
+  compactNow: () => Promise<string>;
   sendMessage: (text: string, options?: { followUp?: boolean }) => Promise<void>;
   /** 运行中插话：消息先显示出来，模型在下一轮（或这次回复结束后）处理。 */
   interject: (text: string) => void;
@@ -29,8 +35,6 @@ interface AgentState {
 
 let activeController: AbortController | null = null;
 
-/** 发给模型的历史条数上限；不设上限时长对话会超出上下文窗口直接报错。 */
-const MAX_HISTORY_MESSAGES = 40;
 /** 最近几条带工具调用的回复，把工具结果摘要一起放进历史 */
 const TOOL_CONTEXT_REPLIES = 3;
 const TOOL_CONTEXT_CHARS = 2400;
@@ -57,6 +61,53 @@ function toolContext(runs?: ToolRun[]): string {
     lines.push(`- ${run.name} ${args.slice(0, 200)} → ${result}`);
   }
   return `\n\n<tool_history>\n（这条回复调用过的工具和结果摘要，用户看不到；接着聊时直接引用，不用重复搜索）\n${lines.join("\n")}\n</tool_history>`;
+}
+
+/**
+ * 组装发给模型的历史：太长就把较早的消息压缩成摘要（存回会话），
+ * 最近几条回复用过的工具结果一起带上。
+ */
+async function buildHistory(target: ChatTarget, messages: Message[], force: boolean, setCompacting: (value: boolean) => void) {
+  const conversation = useChatStore.getState().conversations.find((item) => item.id === target.conversationId);
+  const config = loadConfig();
+  const key = usageKey(target.botId, target.conversationId);
+  const last = useContextUsageStore.getState().byKey[key];
+  const overhead = last
+    ? last.parts
+        .filter((part) => !part.deferred && part.key !== "messages" && part.key !== "summary" && part.key !== "toolResults")
+        .reduce((sum, part) => sum + part.tokens, 0)
+    : 9000;
+  let prepared;
+  try {
+    prepared = await prepareHistory({
+      messages: messages.filter((message) => message.content.trim()),
+      summary: conversation?.summary,
+      summaryUpTo: conversation?.summaryUpTo,
+      summarizedCount: conversation?.summarizedCount,
+      window: contextWindowFor(config.model),
+      overhead,
+      reserve: config.maxTokens ?? 4096,
+      force,
+      onCompacting: () => setCompacting(true),
+    });
+  } finally {
+    setCompacting(false);
+  }
+  if (prepared.updated) useChatStore.getState().setSummary(target, prepared.updated);
+
+  const recent = prepared.recent as Message[];
+  // 最近几条回复用过的工具（搜到了什么、读了哪个网页）一起带上，追问“第二条展开说说”时模型才接得上
+  const withTools = new Set(
+    recent
+      .map((message, index) => (message.role === "assistant" && message.toolRuns?.length ? index : -1))
+      .filter((index) => index >= 0)
+      .slice(-TOOL_CONTEXT_REPLIES)
+  );
+  const history = recent.map((message, index) => ({
+    role: message.role,
+    content: withTools.has(index) ? `${message.content}${toolContext(message.toolRuns)}` : message.content,
+  }));
+  return { history, summary: prepared.summary, compacted: prepared.compacted, newlyCompacted: prepared.updated ? prepared.updated.count : 0, key };
 }
 
 /** 发给桌宠气泡的摘要：保留 Markdown，表格 / 代码换成提示，按行截断。 */
@@ -229,6 +280,17 @@ export const useAgentStore = create<AgentState>((set) => ({
   streamText: "",
   error: null,
   currentToolRuns: [],
+  compacting: false,
+
+  compactNow: async () => {
+    if (useAgentStore.getState().isStreaming || useAgentStore.getState().compacting) return "正在回复中，等这条回完再压缩。";
+    const target = { botId: getActiveBotId(), conversationId: useChatStore.getState().activeConversationId };
+    const before = useChatStore.getState().conversations.find((item) => item.id === target.conversationId)?.summarizedCount || 0;
+    const result = await buildHistory(target, useChatStore.getState().messages, true, (value) => set({ compacting: value }));
+    useContextUsageStore.getState().patch(result.key, { compacted: result.compacted });
+    if (result.newlyCompacted > before) return `已把前面 ${result.newlyCompacted} 条消息整理成摘要，之后只带摘要和最近几条。`;
+    return "没有可以压缩的内容，或者当前模型不支持（本机 Claude / CodeBuddy 不能用来总结）。";
+  },
 
   sendMessage: async (text: string, sendOptions?: { followUp?: boolean }) => {
     activeController?.abort();
@@ -259,18 +321,6 @@ export const useAgentStore = create<AgentState>((set) => ({
       }
       messages = [...kept, { ...messages[messages.length - 1], role: "user", content: text }];
     }
-    const recent = messages.filter((message) => message.content.trim()).slice(-MAX_HISTORY_MESSAGES);
-    // 最近几条回复用过的工具（搜到了什么、读了哪个网页）一起带上，追问“第二条展开说说”时模型才接得上
-    const withTools = new Set(
-      recent
-        .map((message, index) => (message.role === "assistant" && message.toolRuns?.length ? index : -1))
-        .filter((index) => index >= 0)
-        .slice(-TOOL_CONTEXT_REPLIES)
-    );
-    const history = recent.map((message, index) => ({
-      role: message.role,
-      content: withTools.has(index) ? `${message.content}${toolContext(message.toolRuns)}` : message.content,
-    }));
     let toolRuns: ToolRun[] = [];
     const unsubscribeToolEvents = subscribeToolEvents((event) => {
       toolRuns = reduceToolRuns(toolRuns, event);
@@ -316,13 +366,19 @@ export const useAgentStore = create<AgentState>((set) => ({
         return;
       }
 
+      const prepared = await buildHistory(target, messages, false, (value) => set({ compacting: value }));
+      if (controller.signal.aborted) throw new DOMException("生成已停止", "AbortError");
       const fullText = await streamChat(
-        { messages: history, userMessage: text },
+        { messages: prepared.history, userMessage: text },
         (chunk) => {
           set((state) => ({ streamText: state.streamText + chunk }));
         },
         {
           signal: controller.signal,
+          conversationKey: prepared.key,
+          summary: prepared.summary,
+          compacted: prepared.compacted,
+          onUsage: (usage) => useContextUsageStore.getState().record(prepared.key, usage),
           onToolEvent: (event: ToolEvent) => {
             toolRuns = reduceToolRuns(toolRuns, event);
             set({ currentToolRuns: [...toolRuns] });

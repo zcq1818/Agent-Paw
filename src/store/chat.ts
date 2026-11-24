@@ -21,6 +21,12 @@ export type Conversation = {
   messages: Message[];
   createdAt: string;
   updatedAt: string;
+  /** 长对话自动压缩：更早的消息整理成的摘要 */
+  summary?: string;
+  /** 摘要覆盖到哪条消息（含） */
+  summaryUpTo?: string;
+  /** 摘要里一共压缩了多少条消息 */
+  summarizedCount?: number;
 };
 
 interface ChatState {
@@ -34,6 +40,8 @@ interface ChatState {
    */
   addMessageTo: (target: ChatTarget, msg: Omit<Message, "id" | "createdAt">) => void;
   updateLastAssistant: (content: string) => void;
+  /** 保存（或清掉）会话的压缩摘要 */
+  setSummary: (target: ChatTarget, summary: { text: string; upTo: string; count: number } | null) => void;
   removeMessage: (id: string) => void;
   removeLastAssistant: () => void;
   clear: () => void;
@@ -209,6 +217,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch {}
   },
 
+  setSummary: (target, summary) => {
+    const apply = (conversation: Conversation): Conversation =>
+      summary
+        ? { ...conversation, summary: summary.text, summaryUpTo: summary.upTo, summarizedCount: summary.count }
+        : { ...conversation, summary: undefined, summaryUpTo: undefined, summarizedCount: undefined };
+
+    if (target.botId === getActiveBotId()) {
+      const state = get();
+      const conversations = state.conversations.map((conversation) =>
+        conversation.id === target.conversationId ? apply(conversation) : conversation
+      );
+      saveConversations(conversations, state.activeConversationId);
+      set({ conversations });
+      return;
+    }
+    try {
+      const storageKey = scopeKeyFor(STORAGE_KEY, target.botId);
+      const parsed = JSON.parse(localStorage.getItem(storageKey) || "[]") as Conversation[];
+      if (!Array.isArray(parsed)) return;
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify(parsed.map((conversation) => (conversation.id === target.conversationId ? apply(conversation) : conversation)))
+      );
+    } catch {}
+  },
+
   updateLastAssistant: (content) => {
     set((state) =>
       withActiveConversation(state, (conversation) => {
@@ -256,6 +290,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ...conversation,
         messages: [],
         title: "新对话",
+        summary: undefined,
+        summaryUpTo: undefined,
+        summarizedCount: undefined,
         updatedAt: nowIso(),
       }))
     );

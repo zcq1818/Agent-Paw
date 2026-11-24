@@ -28,6 +28,7 @@ import { ensureModelProfiles } from "../agent/kernel";
 import { setActiveModelProfile, useModelProfileStore } from "../agent/modelProfiles";
 import { ChatMessage } from "./ChatMessage";
 import { BotAvatar } from "./BotAvatar";
+import { ContextMeter } from "./ContextMeter";
 import { IconButton, MenuItem, Popover } from "./ui";
 
 const SUGGESTIONS = [
@@ -181,6 +182,7 @@ export function ChatView({ onOpenSidebar, onOpenSettings }: ChatViewProps) {
         <h1 className="min-w-0 flex-1 truncate text-sm font-semibold text-fg" title={conversationTitle}>
           {conversationTitle}
         </h1>
+        <ContextMeter />
         <ModelPicker onManage={onOpenSettings} />
         <IconButton
           label="搜索对话"

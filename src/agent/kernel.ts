@@ -22,6 +22,8 @@ import { BROWSER_USER_AGENT, fetchExternal } from "./http";
 import { bondPrompt } from "./bond";
 import { getJobTools } from "./jobs";
 import { getCnbTools } from "./cnb";
+import { activeTools, createLoaderTool, deferToolsEnabled, deferredIndexPrompt, isMcpTool, planTools } from "./toolLoading";
+import { buildUsage, estimateTokens, type ContextUsage, type UsagePart } from "./contextUsage";
 import { SELF_PROMPT, getSelfControlTools } from "./selfControl";
 import { formatSearchResults, readWebpage, searchWeb } from "./webSearch";
 import {
@@ -743,6 +745,14 @@ export interface StreamChatOptions {
   excludeTools?: string[];
   /** 工具调用轮次上限 */
   maxRounds?: number;
+  /** 会话标识：记住本会话按需加载过的工具，并按会话记录上下文用量 */
+  conversationKey?: string;
+  /** 早期对话压缩成的摘要（放进系统提示） */
+  summary?: string;
+  /** 已压缩进摘要的消息条数（只用于展示） */
+  compacted?: number;
+  /** 每次发送前的上下文用量估算 */
+  onUsage?: (usage: ContextUsage) => void;
 }
 
 export interface ChatRequest {
@@ -824,9 +834,11 @@ export async function streamChat(
     }
   }
 
-  let systemPrompt = buildSystemPrompt();
+  const basePrompt = buildSystemPrompt();
+  let systemPrompt = basePrompt;
+  let memoryContext = "";
   if (config.enableMemory !== false) {
-    const memoryContext = await buildContext({ userText, history: request.messages });
+    memoryContext = await buildContext({ userText, history: request.messages });
     systemPrompt += "\n\n" + memoryContext;
   }
 
@@ -837,10 +849,31 @@ export async function streamChat(
 
   if (options.systemExtra) systemPrompt += `\n\n${options.systemExtra}`;
 
+  // 早期对话的摘要（长对话自动压缩后留下的）
+  const summaryContext = options.summary?.trim()
+    ? `## 之前对话的摘要\n这段对话比较长，更早的内容已经整理成下面的摘要（用户看得到原文，你只看得到摘要）。接着聊时以它为准，不要说自己不记得。\n${options.summary.trim()}`
+    : "";
+  if (summaryContext) systemPrompt += `\n\n${summaryContext}`;
+
   if (config.enablePersonality !== false && !background) {
     personalityStore.learnFromConversation(userText, true);
     personalityStore.trackEvent("message", "user_sent");
   }
+
+  const excluded = new Set(options.excludeTools || []);
+  const tools = [...getTools().filter((tool) => !excluded.has(tool.name)), ...(options.extraTools || [])];
+
+  // 工具按需加载：常用工具带完整定义，其余（含全部 MCP 工具）只在系统提示里列名字
+  const toolPlan = planTools(
+    tools,
+    new Set((options.extraTools || []).map((tool) => tool.name)),
+    options.conversationKey || (background ? undefined : "default"),
+    !localAgent && config.enableTools !== false && deferToolsEnabled()
+  );
+  const loaderTool = toolPlan.enabled ? (createLoaderTool(toolPlan) as Tool) : undefined;
+  const toolIndex = deferredIndexPrompt(toolPlan);
+  if (toolIndex) systemPrompt += `\n\n${toolIndex}`;
+  const runnableTools = loaderTool ? [...tools, loaderTool] : tools;
 
   const currentMessages: any[] = [
     { role: "system", content: systemPrompt },
@@ -849,9 +882,7 @@ export async function streamChat(
       content: message.content,
     })),
   ];
-
-  const excluded = new Set(options.excludeTools || []);
-  const tools = [...getTools().filter((tool) => !excluded.has(tool.name)), ...(options.extraTools || [])];
+  const startMessageCount = currentMessages.length;
 
   if (localAgent) {
     const { runClaudeLocal, localAgentPrompt } = await import("./claudeLocal");
@@ -880,14 +911,58 @@ export async function streamChat(
     });
   }
 
-  const toolDefs = tools.map((tool) => ({
-    type: "function" as const,
-    function: {
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.parameters,
-    },
-  }));
+  const toDefs = (list: Tool[]) =>
+    list.map((tool) => ({
+      type: "function" as const,
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+      },
+    }));
+
+  // 上下文用量：按类别估算，给聊天页的“上下文”面板看
+  const reportUsage = (actual?: number) => {
+    if (!options.onUsage) return;
+    const sent = config.enableTools !== false ? activeTools(toolPlan, loaderTool) : [];
+    const builtinSent = sent.filter((tool) => !isMcpTool(tool));
+    const mcpSent = sent.filter((tool) => isMcpTool(tool));
+    const deferredLeft = toolPlan.deferred.filter((tool) => !toolPlan.loaded.has(tool.name));
+    const history = currentMessages.slice(1, startMessageCount);
+    const toolResults = currentMessages.slice(startMessageCount);
+    const parts: UsagePart[] = [
+      { key: "messages", tokens: estimateTokens(history.map((message) => message.content || "").join("\n")), count: history.length },
+      { key: "summary", tokens: estimateTokens(summaryContext) },
+      { key: "toolResults", tokens: estimateTokens(toolResults), count: toolResults.length },
+      { key: "builtinTools", tokens: estimateTokens(toDefs(builtinSent)), count: builtinSent.length },
+      { key: "mcpTools", tokens: estimateTokens(toDefs(mcpSent)), count: mcpSent.length },
+      { key: "toolIndex", tokens: estimateTokens(toolIndex) },
+      { key: "system", tokens: estimateTokens(basePrompt) + estimateTokens(options.systemExtra || "") },
+      { key: "memory", tokens: estimateTokens(memoryContext) },
+      { key: "skills", tokens: estimateTokens(skillsContext) },
+      {
+        key: "deferredBuiltin",
+        tokens: estimateTokens(toDefs(deferredLeft.filter((tool) => !isMcpTool(tool)))),
+        count: deferredLeft.filter((tool) => !isMcpTool(tool)).length,
+        deferred: true,
+      },
+      {
+        key: "deferredMcp",
+        tokens: estimateTokens(toDefs(deferredLeft.filter((tool) => isMcpTool(tool)))),
+        count: deferredLeft.filter((tool) => isMcpTool(tool)).length,
+        deferred: true,
+      },
+    ];
+    const usage = buildUsage({ model: config.model, reserve: config.maxTokens ?? 4096, parts, compacted: options.compacted });
+    if (actual) usage.actual = actual;
+    options.onUsage(usage);
+  };
+  reportUsage();
+  let lastActualPrompt: number | undefined;
+  const noteUsage = (data: any) => {
+    const value = Number(data?.usage?.prompt_tokens ?? data?.usage?.input_tokens);
+    if (Number.isFinite(value) && value > 0) lastActualPrompt = value;
+  };
 
   const url = buildChatCompletionsUrl(config);
   const shouldStream = config.stream !== false;
@@ -920,6 +995,7 @@ export async function streamChat(
   while (maxRounds > 0) {
     maxRounds -= 1;
     injectInterjections();
+    const toolDefs = toDefs(activeTools(toolPlan, loaderTool));
     securityManager.log("debug", "api", "Sending request to API", {
       provider: config.provider,
       model: config.model,
@@ -979,6 +1055,7 @@ export async function streamChat(
 
     if (!shouldStream) {
       const data = await resp.json();
+      noteUsage(data);
       const apiError = extractApiError(data);
       if (apiError) throw new Error(`API 错误：${apiError}`);
       const message = data.choices?.[0]?.message;
@@ -1016,7 +1093,7 @@ export async function streamChat(
           function: { name: tc.name, arguments: tc.arguments },
         })),
       });
-      await executeRuntimeToolCalls(nonStreamToolCalls, tools, currentMessages, options.onToolEvent, options.signal);
+      await executeRuntimeToolCalls(nonStreamToolCalls, runnableTools, currentMessages, options.onToolEvent, options.signal);
       continue;
     }
 
@@ -1048,6 +1125,7 @@ export async function streamChat(
       // 流式过程中服务商也可能直接推一条错误（讯飞是 {code, message}）。
       const apiError = extractApiError(parsed);
       if (apiError) throw new Error(`API 错误：${apiError}`);
+      noteUsage(parsed);
       try {
         if (parsed.choices?.[0]?.finish_reason === "length") hitLengthLimit = true;
         const delta = parsed.choices?.[0]?.delta;
@@ -1120,8 +1198,10 @@ export async function streamChat(
       })),
     });
 
-    await executeRuntimeToolCalls(toolCalls, tools, currentMessages, options.onToolEvent, options.signal);
+    await executeRuntimeToolCalls(toolCalls, runnableTools, currentMessages, options.onToolEvent, options.signal);
   }
+
+  reportUsage(lastActualPrompt);
 
   if (hitLengthLimit && fullText.trim()) {
     // 模型因为 max_tokens 上限停下，明确告诉用户，而不是看起来像突然断掉。
