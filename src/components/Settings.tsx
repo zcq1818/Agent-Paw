@@ -63,6 +63,7 @@ import { HotkeySettingsCard } from "./HotkeySettings";
 import { CustomSkillsSettings } from "./CustomSkillsSettings";
 import { AlwaysAllowList, InitiativeCard, TimelineOptions } from "./AssistantSettings";
 import { McpServersCard } from "./McpSettings";
+import { ShanHengWorkerCard } from "./ShanHengSettings";
 import { AboutSettingsCard } from "./AboutSettings";
 import { useAvatarOptions } from "../store/petAvatars";
 import type { ComputerControlMode } from "../agent/computer";
@@ -754,6 +755,8 @@ export function Settings({ onBack, onOpenSidebar, initialSection }: SettingsProp
               </Card>
 
               <InitiativeCard activityEnabled={activityEnabled} />
+
+              <ShanHengWorkerCard />
 
               <Card title="技能与统计">
                 <SettingRow title="自定义技能" description="创建、导入或停用技能。">
