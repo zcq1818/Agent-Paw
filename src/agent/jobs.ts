@@ -64,10 +64,10 @@ export interface Job {
   review?: JobReview;
   reviewing?: boolean;
   feedback?: { good: boolean; comment?: string; at: number };
-  /** 从哪儿来的：工作台 / 聊天里交代的 / 从山衡领来的（员工模式，见 shanheng.ts） */
-  source?: "panel" | "chat" | "shanheng";
-  /** 别处派来的活：干完要交回去 */
-  external?: { kind: "shanheng"; taskId: number; stoppedByShanHeng?: boolean };
+  /** 从哪儿来的：工作台 / 聊天里交代的 / 员工模式从别的系统领来的（见 worker.ts） */
+  source?: "panel" | "chat" | "worker";
+  /** 别的系统经 MCP 派来的活：干完用同一个 MCP 交回去 */
+  external?: { kind: "mcp"; serverId: string; serverName: string; taskId: number; stoppedByOwner?: boolean };
 }
 
 const JOBS_KEY = "paw_jobs";
@@ -324,8 +324,7 @@ async function runJob(job: Job, signal: AbortSignal, onEvent: (job: Job) => void
         onToolEvent,
         background: true,
         systemExtra: WORK_PROMPT,
-        // 从山衡领来的活：多两个找同事的工具
-        extraTools: job.external?.kind === "shanheng" ? [...workTools(job.id), ...(await import("./shanheng")).shanHengColleagueTools()] : workTools(job.id),
+        extraTools: workTools(job.id),
         excludeTools: ["start_job"],
         maxRounds: 40,
       }

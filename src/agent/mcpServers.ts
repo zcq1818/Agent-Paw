@@ -424,6 +424,44 @@ export function formatMcpResult(result: any): string {
   return result.isError ? `工具报错：${text}` : text;
 }
 
+// ───────────────────────── 员工协议 ─────────────────────────
+
+/**
+ * 员工协议（各家 MCP 约定好的工具名，见 agent/worker.ts）：领活、心跳、交付、报卡住由员工模式自己调，不给模型；
+ * 找同事（list_colleagues、ask_colleague）是只读工具，照常给模型用。
+ */
+export const WORKER_LOOP_TOOLS = new Set(["worker_profile", "claim_task", "report_task_progress", "submit_task", "report_task_stuck"]);
+
+/** 这个服务能不能当工作来源（提供了领活和交付） */
+export function isWorkerServer(state?: McpServerState) {
+  const names = new Set((state?.tools || []).map((tool) => tool.name));
+  return names.has("claim_task") && names.has("submit_task");
+}
+
+/** 员工模式直接调某个服务的工具：返回结构化结果（没有就把文字当 JSON 解析），工具报错抛出 */
+export async function callMcpToolJson<T = any>(serverId: string, name: string, args: Record<string, unknown> = {}, timeoutMs = 60_000): Promise<T> {
+  const server = loadMcpServers().find((item) => item.id === serverId);
+  if (!server) throw new Error("找不到这个 MCP 服务");
+  const result = await mcpRequest(server, "tools/call", { name, arguments: args }, { timeoutMs });
+  const text = (Array.isArray(result?.content) ? result.content : []).find((item: any) => item?.type === "text")?.text || "";
+  let parsed: any = result?.structuredContent;
+  if (parsed === undefined) {
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      parsed = text;
+    }
+  }
+  if (result?.isError) {
+    let message = text;
+    try {
+      message = JSON.parse(text)?.error || text;
+    } catch {}
+    throw new Error(message || `${name} 调用失败`);
+  }
+  return parsed as T;
+}
+
 // ───────────────────────── 转成桌宠工具 ─────────────────────────
 
 function slugify(server: McpServerConfig, used: Set<string>) {
@@ -467,6 +505,8 @@ export function getMcpTools(): Tool[] {
     if (!info?.tools?.length) continue;
     const slug = slugify(server, used);
     for (const tool of info.tools) {
+      // 员工协议的领活 / 交付由员工模式自己调，不给模型（免得聊天时它去领活、乱交付）
+      if (isWorkerServer(info) && WORKER_LOOP_TOOLS.has(tool.name)) continue;
       const name = toolName(slug, tool.name);
       if (names.has(name)) continue;
       names.add(name);
